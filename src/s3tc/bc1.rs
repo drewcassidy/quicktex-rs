@@ -1,0 +1,52 @@
+use crate::color::{Color, ColorImpl};
+use crate::pack::{Pack, Unpack};
+use crate::texture::Block;
+use bitvec::prelude::*;
+use std::iter::zip;
+use vector_victor::Matrix;
+
+#[derive(Copy, Clone)]
+pub struct BC1Block {
+    colors: [Color; 2],
+    codes: Matrix<u8, 4, 4>,
+}
+
+impl Block for BC1Block {
+    type Bytes = [u8; 8];
+    const SIZE: usize = 8;
+
+    fn to_bytes(&self) -> Self::Bytes {
+        let mut bytes: Self::Bytes = [0; 8];
+        let bits = bytes.view_bits_mut::<Msb0>();
+
+        // store endpoints
+        bits[0..16].store_le(self.colors[0].to_565());
+        bits[16..32].store_le(self.colors[1].to_565());
+
+        // store codes
+        zip(self.codes.rows(), bits[32..].chunks_mut(8))
+            // pack each row of 2-bit values into reversed chunks
+            .for_each(|(src, dst)| dst.rchunks_mut(2).pack_be(src));
+
+        bytes
+    }
+
+    fn from_bytes(bytes: &Self::Bytes) -> Self {
+        let bits = bytes.as_bits::<Msb0>();
+
+        // load endpoints
+        let color0 = Color::from_565(bits[0..16].load_le());
+        let color1 = Color::from_565(bits[16..32].load_le());
+
+        // load codes
+        let codes = Matrix::<u8, 4, 4>::from_rows(
+            // reverse each row of 2-bit numbers and collect them to a Vector
+            bits.chunks(8).map(|r| r.rchunks(2).unpack_le().collect()),
+        );
+
+        Self {
+            colors: [color0, color1],
+            codes,
+        }
+    }
+}

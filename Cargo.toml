@@ -1,5 +1,5 @@
 [package]
-name = "quicktex-rs"
+name = "quicktex"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,5 +8,8 @@ edition = "2021"
 [dependencies]
 arrayvec = "0.7.4"
 bitvec = "1.0.1"
+funty = "2.0.0"
+image = "0.24.6"
 itertools = "0.11.0"
+rayon = "1.7.0"
 vector-victor = "0.1.0"

@@ -3,6 +3,10 @@ use bitvec::macros::internal::funty::Integral;
 use bitvec::order::BitOrder;
 use bitvec::prelude::BitSlice;
 use bitvec::store::BitStore;
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 use std::iter::{zip, Map};
 
 pub trait Pack: IntoIterator {
@@ -16,7 +20,7 @@ where
     BitSlice<T, O>: BitField,
 {
     fn pack_le<V: Integral + Into<isize>, U: IntoIterator<Item = V>>(self, unpacked: U) {
-        for (src, mut dst) in zip(unpacked, self) {
+        for (src, dst) in zip(unpacked, self) {
             assert!(
                 src.into() < (1 << (dst.len()) - 1) as isize,
                 "Input value {:X} cannot be packed into {} bits",
@@ -28,7 +32,7 @@ where
     }
 
     fn pack_be<V: Integral + Into<isize>, U: IntoIterator<Item = V>>(self, unpacked: U) {
-        for (src, mut dst) in zip(unpacked, self) {
+        for (src, dst) in zip(unpacked, self) {
             assert!(
                 src.into() < (1 << (dst.len()) - 1) as isize,
                 "Input value {:X} cannot be packed into {} bits",

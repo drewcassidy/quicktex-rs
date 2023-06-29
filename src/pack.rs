@@ -1,13 +1,12 @@
-use bitvec::field::BitField;
-use bitvec::macros::internal::funty::Integral;
-use bitvec::order::BitOrder;
-use bitvec::prelude::BitSlice;
-use bitvec::store::BitStore;
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use std::iter::{zip, Map};
+
+use bitvec::field::BitField;
+use bitvec::prelude::*;
+use funty::Integral;
 
 pub trait Pack: IntoIterator {
     fn pack_le<V: Integral + Into<isize>, U: IntoIterator<Item = V>>(self, unpacked: U);

@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-mod color;
-mod dds;
-mod pack;
-mod s3tc;
-mod texture;
-mod util;
+pub mod color;
+pub mod dds;
+pub mod pack;
+pub mod s3tc;
+pub mod texture;
+pub mod util;

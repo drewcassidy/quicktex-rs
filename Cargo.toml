@@ -7,13 +7,13 @@ license = "MPL-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arrayvec = "0.7.4"
-bitflags = "2.3.3"
+arrayvec = "0.7"
 bitvec = "1.0.1"
-byteorder = "1.4.3"
+clap = { version = "4.3", features = ["cargo"] }
+enumflags2 = {version="0.7.7", features=["std"] }
 funty = "2.0.0"
 image = "0.24.6"
-itertools = "0.11.0"
+itertools = "0.11"
 miette = "5.9.0"
 rayon = "1.7.0"
 thiserror = "1.0.40"

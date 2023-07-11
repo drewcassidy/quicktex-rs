@@ -8,30 +8,29 @@ use crate::util::ReadExt;
 use arrayvec::ArrayString;
 use enumflags2::{bitflags, BitFlags};
 
-use itertools::Itertools;
 use std::fmt::Debug;
 use std::io::SeekFrom::Current;
 use std::io::{Read, Seek};
 
-enum ColorFormat {
-    RGB { bitcount: u32, bitmasks: [u32; 3] },
-    YUV { bitcount: u32, bitmasks: [u32; 3] },
-    L { bitcount: u32, bitmask: u32 },
-    A { bitcount: u32, bitmask: u32 },
-}
-
-enum PixelFormat {
-    Compressed {
-        size: u32,
-        four_cc: ArrayString<4>,
-    },
-    Uncompressed {
-        pitch: u32,
-        alpha_bitmask: Option<u32>,
-        color_format: ColorFormat,
-    },
-    // todo: DX10 header option
-}
+// enum ColorFormat {
+//     RGB { bitcount: u32, bitmasks: [u32; 3] },
+//     YUV { bitcount: u32, bitmasks: [u32; 3] },
+//     L { bitcount: u32, bitmask: u32 },
+//     A { bitcount: u32, bitmask: u32 },
+// }
+//
+// enum PixelFormat {
+//     Compressed {
+//         size: u32,
+//         FOUR_CC: ArrayString<4>,
+//     },
+//     Uncompressed {
+//         pitch: u32,
+//         alpha_bitmask: Option<u32>,
+//         color_format: ColorFormat,
+//     },
+//     // todo: DX10 header option
+// }
 
 #[bitflags]
 #[repr(u32)]

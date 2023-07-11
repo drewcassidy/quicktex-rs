@@ -4,7 +4,7 @@ use std::fs::File;
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 use clap::{arg, command, value_parser, ArgAction, Command};
 use miette::IntoDiagnostic;
-use quicktex::dds::DDSFile;
+use quicktex::container::dds::DDSFile;
 
 fn main() -> miette::Result<()> {
     let matches = command!().arg(arg!([path] "file path")).get_matches();

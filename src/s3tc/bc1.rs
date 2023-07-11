@@ -9,6 +9,8 @@ use bitvec::prelude::*;
 use std::iter::zip;
 use vector_victor::Matrix;
 
+pub struct BC1Format {}
+
 #[derive(Copy, Clone)]
 pub struct BC1Block {
     colors: [Color; 2],

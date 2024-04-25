@@ -10,7 +10,7 @@ use enumflags2::{bitflags, BitFlags};
 
 use crate::container::{ContainerError, Result};
 use crate::container::Container;
-use crate::texture::Texture;
+use crate::texture::{CubemapFace, Texture};
 use crate::util::ReadExt;
 
 #[bitflags]
@@ -50,6 +50,39 @@ pub enum Caps2 {
     Volume = 0x200000,
 }
 
+use crate::container::dds::Caps2::*;
+use crate::dimensions::Dimensions;
+
+impl Caps2 {
+    fn all_faces() -> BitFlags<Caps2> {
+        CubemapPositiveX | CubemapNegativeX | CubemapPositiveY |
+            CubemapNegativeY | CubemapPositiveZ | CubemapNegativeZ
+    }
+
+    fn to_cubemap_face(self) -> CubemapFace {
+        match self {
+            CubemapPositiveX => CubemapFace::PositiveX,
+            CubemapNegativeX => CubemapFace::NegativeX,
+            CubemapPositiveY => CubemapFace::PositiveY,
+            CubemapNegativeY => CubemapFace::NegativeY,
+            CubemapPositiveZ => CubemapFace::PositiveZ,
+            CubemapNegativeZ => CubemapFace::NegativeZ,
+            _ => { panic!("Not a cubemap face!") }
+        }
+    }
+
+    fn from_cubemap_face(face: CubemapFace) -> Self {
+        match face {
+            CubemapFace::PositiveX => CubemapPositiveX,
+            CubemapFace::NegativeX => CubemapNegativeX,
+            CubemapFace::PositiveY => CubemapPositiveY,
+            CubemapFace::NegativeY => CubemapNegativeY,
+            CubemapFace::PositiveZ => CubemapPositiveZ,
+            CubemapFace::NegativeZ => CubemapNegativeZ
+        }
+    }
+}
+
 /// Named tuple containing all "Caps" bitflags
 #[derive(BinRead, BinWrite)]
 #[derive(Debug, Clone)]
@@ -79,7 +112,6 @@ pub enum PixelFormatFlags {
 
 #[derive(BinRead, BinWrite)]
 #[derive(Debug, Clone)]
-#[br(little)]
 struct PixelFormat {
     #[brw(magic = 32u32)] // Size constant
     #[br(try_map = BitFlags::from_bits)]
@@ -95,7 +127,6 @@ struct PixelFormat {
 
 #[derive(BinRead, BinWrite)]
 #[derive(Debug, Clone)]
-#[brw(little, magic = b"DDS ")]
 pub struct DDSHeader {
     #[brw(magic = 124u32)] // Size constant
     #[br(try_map = BitFlags::from_bits)]
@@ -112,7 +143,8 @@ pub struct DDSHeader {
     caps: Caps,
 }
 
-#[binrw]
+#[derive(BinRead, BinWrite)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[brw(little, repr = u32)]
 pub enum DXGIFormat {
     Unknown = 0,
@@ -236,7 +268,8 @@ pub enum DXGIFormat {
     V408 = 132,
 }
 
-#[binrw]
+#[derive(BinRead, BinWrite)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[brw(little, repr = u32)]
 pub enum Dimension {
     Texture1D = 2,
@@ -244,7 +277,8 @@ pub enum Dimension {
     Texture3D = 4,
 }
 
-#[binrw]
+#[derive(BinRead, BinWrite)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[brw(little, repr = u32)]
 pub enum AlphaMode {
     Unknown = 0,
@@ -254,7 +288,8 @@ pub enum AlphaMode {
     Custom = 4,
 }
 
-#[binrw]
+#[derive(BinRead, BinWrite)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DX10Header {
     format: DXGIFormat,
     dimension: Dimension,
@@ -265,36 +300,91 @@ pub struct DX10Header {
     alpha_mode: AlphaMode,
 }
 
+#[derive(BinRead)]
 #[derive(Debug, Clone)]
+#[brw(little, magic = b"DDS ")]
 pub struct DDSFile {
     pub header: DDSHeader,
-    pub data: Vec<u8>,
+    #[br(if (header.pixel_format.four_cc == * b"DX10"))]
+    pub dx10header: Option<DX10Header>,
 }
 
-impl Container for DDSFile {
-    type Header = DDSHeader;
-
-    fn load<R: BufRead + Seek>(&self, mut reader: R) -> Result<Self> {
-        reader.rewind()?;
-
-        let magic = reader.load_array_le::<u8, 4>()?;
-
-        if &magic != b"DDS " {
-            let message = format!("{0} (0x{1:X?})",
-                                  String::from_utf8_lossy(&magic),
-                                  magic);
-            return Err(ContainerError::Signature(message));
+fn faces(header: &DDSHeader, dx10header: &Option<DX10Header>) -> Option<Vec<CubemapFace>> {
+    return match dx10header {
+        None => {
+            // if there's no DX10 header, we read from the caps flags
+            let caps2 = header.caps.1;
+            if caps2.contains(Caps2::Cubemap) {
+                Some(
+                    (caps2 & Caps2::all_faces()).iter()
+                        .map(Caps2::to_cubemap_face)
+                        .collect())
+            } else { None }
         }
+        Some(dx10header) => {
+            // if there is a DX10 header, we check the cube flag.
+            // DX10 DDS files do not support partial cubemaps
+            if dx10header.cube {
+                Some(CubemapFace::all())
+            } else { None }
+        }
+    };
+}
 
+fn layers(header: &DDSHeader, dx10header: &Option<DX10Header>) -> Option<u32> {
+    return match dx10header {
+        None => {
+            // non-DX10 DDS files do not support arrays
+            None
+        }
+        Some(dx10header) => {
+            match dx10header.array_size {
+                1 | 0 => None,
+                layers => Some(layers)
+            }
+        }
+    };
+}
 
-        todo!()
-    }
+fn mips(header: &DDSHeader) -> Option<u32> {
+    return match (header.flags.contains(DDSFlags::MipmapCount), header.mipmap_count) {
+        (false, _) => None,
+        (true, 0 | 1) => None,
+        (true, mips) => Some(mips)
+    };
+}
 
-    fn header(&self) -> &Self::Header {
-        todo!()
-    }
+fn dimensions(header: &DDSHeader, dx10header: &Option<DX10Header>) -> Dimensions {
+    return match dx10header {
+        None =>
+            match header.flags.contains(DDSFlags::Depth) {
+                true => Dimensions::_3D {
+                    width: header.width,
+                    height: header.height,
+                    depth: header.depth,
+                },
+                false => Dimensions::_2D {
+                    width: header.width,
+                    height: header.height,
+                }
+            }
 
-    fn texture(&self) -> &Texture {
-        todo!()
-    }
+        Some(dx10header) =>
+            match dx10header.dimension {
+                Dimension::Texture1D => Dimensions::_1D {
+                    width: header.width
+                },
+
+                Dimension::Texture2D => Dimensions::_2D {
+                    width: header.width,
+                    height: header.height,
+                },
+
+                Dimension::Texture3D => Dimensions::_3D {
+                    width: header.width,
+                    height: header.height,
+                    depth: header.depth,
+                },
+            }
+    };
 }

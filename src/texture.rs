@@ -51,21 +51,19 @@ impl<T> AsSlice<T> for &[T] {
 }
 
 #[derive(Clone)]
-struct Texture {
-    metadata: Format,
-    dimensions: Dimensions,
+pub struct Texture {
     shape: TextureShape,
 }
 
 #[derive(Copy, Clone)]
-enum TextureIndex {
+pub enum TextureIndex {
     Face(CubemapFace),
     Mip(usize),
     Layer(usize),
 }
 
 #[derive(Copy, Clone)]
-enum CubemapFace {
+pub enum CubemapFace {
     PositiveX = 0,
     NegativeX = 1,
     PositiveY = 2,
@@ -74,16 +72,33 @@ enum CubemapFace {
     NegativeZ = 5,
 }
 
+impl CubemapFace {
+    pub(crate) fn all() -> Vec<CubemapFace> {
+        return vec![
+            Self::PositiveX,
+            Self::NegativeX,
+            Self::PositiveY,
+            Self::NegativeY,
+            Self::PositiveZ,
+            Self::NegativeZ,
+        ];
+    }
+}
+
 #[derive(Clone)]
-enum TextureShape {
+pub enum TextureShape {
     Array(Vec<TextureShape>),
     Cube(Box<[TextureShape; 6]>),
     MipChain(Vec<TextureShape>),
-    Image(Rc<[u8]>),
+    Image {
+        dimensions: Dimensions,
+        buffer: Rc<[u8]>,
+    },
+    None,
 }
 
 impl TextureShape {
-    fn iter_mut(&mut self) -> impl Iterator<Item = &mut TextureShape> {
+    fn iter_mut(&mut self) -> impl Iterator<Item=&mut TextureShape> {
         match self {
             TextureShape::Array(v) => v.iter_mut(),
             TextureShape::Cube(c) => c.iter_mut(),

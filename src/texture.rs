@@ -4,10 +4,10 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::ops::Index;
 use std::rc::Rc;
 use std::slice;
 use std::slice::SliceIndex;
+use strum::VariantArray;
 
 use crate::dimensions::Dimensions;
 
@@ -31,7 +31,7 @@ struct BlockTexture<B>
     blocks: Vec<B>,
 }
 
-trait AsSlice<T> {
+pub trait AsSlice<T> {
     fn as_slice(&self) -> &[T];
 }
 
@@ -49,17 +49,12 @@ impl<T> AsSlice<T> for &[T] {
 
 #[derive(Clone)]
 pub struct Texture {
-    shape: TextureShape,
+    buffers: TextureShapeNode<Rc<[u8]>>,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum TextureIndex<I: Sized + Clone + Debug = usize> {
-    Face(CubemapFace),
-    Mip(I),
-    Layer(I),
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, strum::VariantArray)]
+/// The face index of one face of a cubemap
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, VariantArray)]
+#[repr(usize)]
 pub enum CubemapFace {
     PositiveX,
     NegativeX,
@@ -69,107 +64,193 @@ pub enum CubemapFace {
     NegativeZ,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum TextureIndex<I: Sized + Clone + Debug = usize> {
+    Face(CubemapFace),
+    Mip(I),
+    Layer(I),
+}
 
+impl TextureIndex<usize> {
+    /// Return the next index
+    ///
+    /// For mips and faces, this is just the index + 1.
+    ///
+    /// For faces, this is the next face in the `CubemapFace` enum, wrapping around to `PositiveX`
+    /// when it reaches the end
+    fn next(&self) -> TextureIndex {
+        match self {
+            TextureIndex::Face(f) => {
+                let mut face_index = *f as usize;
+                face_index += 1;
+                face_index %= CubemapFace::VARIANTS.len();
+
+                TextureIndex::Face(
+                    CubemapFace::VARIANTS[face_index]
+                )
+            }
+            TextureIndex::Mip(m) => { TextureIndex::Mip(m + 1) }
+            TextureIndex::Layer(l) => { TextureIndex::Layer(l + 1) }
+        }
+    }
+}
+
+
+/// An iterator for a TextureShape
+/// Can iterate over faces, layers, or mips
+pub struct TextureIterator<'a, T: TextureShape> {
+    texture: &'a T,
+    current: TextureIndex<usize>,
+    len: usize,
+}
+
+
+impl<'a, T: TextureShape> Iterator for TextureIterator<'a, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.len > 0 {
+            let next = self.texture.get(self.current);
+            if next.is_some() { return next; }
+
+            self.current = self.current.next();
+            self.len -= 1;
+        }
+        return None;
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
+}
+
+impl<'a, T: TextureShape> ExactSizeIterator for TextureIterator<'a, T> {}
+
+/// A trait for a shaped texture, allowing slicing by face, layer, or mip.
+pub trait TextureShape: Sized {
+    fn get<I>(&self, index: TextureIndex<I>) -> Option<Self>
+        where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug;
+
+    fn get_face(&self, index: CubemapFace) -> Option<Self> {
+        self.get::<usize>(TextureIndex::Face(index))
+    }
+
+    fn get_layer<I>(&self, index: I) -> Option<Self>
+        where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug
+    {
+        self.get(TextureIndex::Layer(index))
+    }
+
+    fn get_mip<I>(&self, index: I) -> Option<Self>
+        where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug,
+    {
+        self.get(TextureIndex::Mip(index))
+    }
+}
+
+/// One node of a texture shape data structure
 #[derive(Clone, Debug)]
-pub enum TextureShape {
-    Array(Vec<TextureShape>),
-    Cube(HashMap<CubemapFace, TextureShape>),
-    MipChain(Vec<TextureShape>),
-    Image {
+pub enum TextureShapeNode<B: Sized + Clone> {
+    Array(Vec<Self>),
+    Cube(HashMap<CubemapFace, Self>),
+    MipChain(Vec<Self>),
+    Surface {
         dimensions: Dimensions,
-        buffer: Rc<[u8]>,
+        buffer: B,
     },
 }
 
-impl<'a> TextureShape {
-    fn iter(&'a self) -> Box<dyn Iterator<Item=&'a TextureShape> + 'a> {
+
+impl<'a, B: Clone> TextureShapeNode<B> {
+    fn iter(&'a self) -> Box<dyn Iterator<Item=&'a Self> + 'a> {
         match self {
-            TextureShape::Array(v) => Box::new(v.iter()),
-            TextureShape::Cube(c) => Box::new(c.values()),
-            TextureShape::MipChain(m) => Box::new(m.iter()),
+            TextureShapeNode::Array(v) => Box::new(v.iter()),
+            TextureShapeNode::Cube(c) => Box::new(c.values()),
+            TextureShapeNode::MipChain(m) => Box::new(m.iter()),
             _ => Box::new(slice::from_ref(self).iter()),
         }
     }
 
     fn mips(&self) -> Option<usize> {
         match self {
-            TextureShape::Image { .. } => { None }
-            TextureShape::MipChain(v) => { Some(v.len()) }
-            _ => self.iter().next().and_then(TextureShape::mips)
+            TextureShapeNode::Surface { .. } => { None }
+            TextureShapeNode::MipChain(v) => { Some(v.len()) }
+            _ => self.iter().next().and_then(TextureShapeNode::mips)
         }
-    }
-
-    fn mip<I>(&self, index: I) -> TextureShape
-        where I: SliceIndex<[TextureShape], Output: AsSlice<TextureShape>> + Copy + Debug,
-    {
-        self.index(TextureIndex::Mip(index))
     }
 
     fn layers(&self) -> Option<usize> {
         match self {
-            TextureShape::Image { .. } => { None }
-            TextureShape::Array(v) => { Some(v.len()) }
-            _ => self.iter().next().and_then(TextureShape::layers)
+            TextureShapeNode::Surface { .. } => { None }
+            TextureShapeNode::Array(v) => { Some(v.len()) }
+            _ => self.iter().next().and_then(TextureShapeNode::layers)
         }
     }
 
-    fn layer<I>(&self, index: I) -> TextureShape
-        where I: SliceIndex<[TextureShape], Output: AsSlice<TextureShape>> + Copy + Debug,
-    {
-        self.index(TextureIndex::Layer(index))
-    }
 
     fn faces(&self) -> Option<Vec<CubemapFace>> {
         match self {
-            TextureShape::Image { .. } => { None }
-            TextureShape::Cube(faces) => { Some(faces.keys().cloned().collect()) }
-            _ => self.iter().next().and_then(TextureShape::faces)
+            TextureShapeNode::Surface { .. } => { None }
+            TextureShapeNode::Cube(faces) => { Some(faces.keys().cloned().collect()) }
+            _ => self.iter().next().and_then(TextureShapeNode::faces)
         }
     }
+}
 
-    fn face(&self, index: CubemapFace) -> TextureShape {
-        self.index::<usize>(TextureIndex::Face(index))
-    }
-
-    fn index<I>(&self, index: TextureIndex<I>) -> TextureShape
-        where I: SliceIndex<[TextureShape], Output: AsSlice<TextureShape>> + Copy + Debug
+impl<B: Clone> TextureShape for TextureShapeNode<B> {
+    fn get<I>(&self, index: TextureIndex<I>) -> Option<Self>
+        where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug
     {
         return match (self, index) {
-            (TextureShape::Image { .. }, _) => self.clone(),
+            (TextureShapeNode::Surface { .. }, _) => Some(self.clone()),
 
-            (TextureShape::Cube(faces), TextureIndex::Face(f)) => { faces[&f].clone() }
-            (TextureShape::Cube(faces), index) => {
-                TextureShape::Cube(faces.iter().map(|(i, f)| (*i, f.index(index))).collect())
+            (TextureShapeNode::Cube(faces), TextureIndex::Face(f)) => { Some(faces.get(&f)?.clone()) }
+            (TextureShapeNode::Cube(faces), index) => {
+                Some(TextureShapeNode::Cube(
+                    faces.iter()
+                        .map(|(i, f)| Some((*i, f.get(index)?)))
+                        .collect::<Option<_>>()?
+                ))
             }
 
-            (TextureShape::MipChain(mips), TextureIndex::Mip(m)) => {
-                let mips: Vec<TextureShape> = mips[m].as_slice().into();
+            (TextureShapeNode::MipChain(mips), TextureIndex::Mip(m)) => {
+                let mips = mips.get(m)?.as_slice();
                 match &mips[..] {
                     [single] => {
                         assert_eq!(single.mips(), None);
-                        single.clone()
+                        Some(single.clone())
                     }
                     [..] => {
-                        TextureShape::MipChain(mips)
+                        Some(TextureShapeNode::MipChain(mips.into()))
                     }
                 }
             }
-            (TextureShape::MipChain(mips), _) => {
-                TextureShape::MipChain(mips.iter().map(|t| t.index(index)).collect())
+            (TextureShapeNode::MipChain(mips), _) => {
+                Some(TextureShapeNode::MipChain(
+                    mips.iter()
+                        .map(|t| t.get(index))
+                        .collect::<Option<_>>()?
+                ))
             }
 
-            (TextureShape::Array(layers), TextureIndex::Layer(l)) => {
-                let layers: Vec<TextureShape> = layers[l].as_slice().into();
+            (TextureShapeNode::Array(layers), TextureIndex::Layer(l)) => {
+                let layers = layers.get(l)?.as_slice();
                 match &layers[..] {
                     [single] => {
                         assert_eq!(single.layers(), None);
-                        single.clone()
+                        Some(single.clone())
                     }
-                    [..] => TextureShape::Array(layers)
+                    [..] => {
+                        Some(TextureShapeNode::Array(layers.into()))
+                    }
                 }
             }
-            (TextureShape::Array(layers), _) => {
-                TextureShape::Array(layers.iter().map(|t| t.index(index)).collect())
+            (TextureShapeNode::Array(layers), _) => {
+                Some(TextureShapeNode::Array(
+                    layers.iter()
+                        .map(|t| t.get(index))
+                        .collect::<Option<_>>()?
+                ))
             }
         };
     }

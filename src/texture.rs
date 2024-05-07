@@ -2,14 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use std::cmp::min;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::iter::{Successors, successors};
+use std::marker::PhantomData;
 use std::rc::Rc;
 use std::slice;
 use std::slice::SliceIndex;
 use strum::VariantArray;
 
-use crate::dimensions::Dimensions;
+use crate::dimensions::{Dimensioned, Dimensions};
 
 pub trait Block: Sized {
     type Bytes: AsRef<[u8]>;
@@ -48,8 +51,18 @@ impl<T> AsSlice<T> for &[T] {
 }
 
 #[derive(Clone)]
+pub struct Surface {
+    dimensions: Dimensions,
+    buffer: Rc<[u8]>,
+}
+
+impl Dimensioned for Surface {
+    fn dimensions(&self) -> Dimensions { self.dimensions }
+}
+
+#[derive(Clone)]
 pub struct Texture {
-    buffers: TextureShapeNode<Rc<[u8]>>,
+    surfaces: TextureShapeNode<Surface>,
 }
 
 /// The face index of one face of a cubemap
@@ -95,7 +108,6 @@ impl TextureIndex<usize> {
     }
 }
 
-
 /// An iterator for a TextureShape
 /// Can iterate over faces, layers, or mips
 pub struct TextureIterator<'a, T: TextureShape> {
@@ -124,10 +136,13 @@ impl<'a, T: TextureShape> Iterator for TextureIterator<'a, T> {
     }
 }
 
+
 impl<'a, T: TextureShape> ExactSizeIterator for TextureIterator<'a, T> {}
 
 /// A trait for a shaped texture, allowing slicing by face, layer, or mip.
 pub trait TextureShape: Sized {
+    type Surface;
+
     fn get<I>(&self, index: TextureIndex<I>) -> Option<Self>
         where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug;
 
@@ -150,18 +165,15 @@ pub trait TextureShape: Sized {
 
 /// One node of a texture shape data structure
 #[derive(Clone, Debug)]
-pub enum TextureShapeNode<B: Sized + Clone> {
+pub(crate) enum TextureShapeNode<S: Sized + Clone + Dimensioned> {
     Array(Vec<Self>),
     Cube(HashMap<CubemapFace, Self>),
     MipChain(Vec<Self>),
-    Surface {
-        dimensions: Dimensions,
-        buffer: B,
-    },
+    Surface(S),
 }
 
 
-impl<'a, B: Clone> TextureShapeNode<B> {
+impl<'a, S: Clone + Dimensioned> TextureShapeNode<S> {
     fn iter(&'a self) -> Box<dyn Iterator<Item=&'a Self> + 'a> {
         match self {
             TextureShapeNode::Array(v) => Box::new(v.iter()),
@@ -197,7 +209,9 @@ impl<'a, B: Clone> TextureShapeNode<B> {
     }
 }
 
-impl<B: Clone> TextureShape for TextureShapeNode<B> {
+impl<S: Clone + Dimensioned> TextureShape for TextureShapeNode<S> {
+    type Surface = S;
+
     fn get<I>(&self, index: TextureIndex<I>) -> Option<Self>
         where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug
     {

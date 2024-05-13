@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::iter::{repeat, zip};
 use std::slice::SliceIndex;
 
 use itertools::Itertools;
@@ -11,19 +12,16 @@ use strum::{Display, VariantArray};
 use thiserror::Error;
 
 use crate::dimensions::{Dimensioned, Dimensions};
-use crate::shape::ShapeError::{DuplicateFaces, Empty, NonUniformDimensions};
+use crate::shape::ShapeError::*;
 use crate::util::AsSlice;
 
 #[derive(Debug, Error)]
 pub enum ShapeError {
-    #[error("Nonuniform {0} counts in provided textures")]
-    NonUniformType(&'static str),
+    #[error("Non-uniform {0} in provided textures")]
+    NonUniform(&'static str),
 
     #[error("Tried to form {0} out of textures that already have {0}s")]
     Nested(&'static str),
-
-    #[error("Nonuniform dimensions in provided textures")]
-    NonUniformDimensions,
 
     #[error("Textures do not have dimensions that form a valid mipchain")]
     InvalidMipChain,
@@ -81,11 +79,16 @@ impl TextureIndex<usize> {
     }
 }
 
+struct TextureIterResult<S> {
+    layer: Option<usize>,
+    face: Option<CubemapFace>,
+    mip: Option<usize>,
+    surface: S,
+}
 
-impl<T: TextureShape> ExactSizeIterator for TextureIterator<T> {}
 
 /// A trait for a shaped texture, allowing slicing by face, layer, or mip.
-/// A TextureShape is made up of multiple surfaces,
+/// A texture is made up of multiple surfaces,
 /// and can contain any combination of mipmaps, cubemaps, or array structures.
 ///
 /// A TextureShape has several guarantees:
@@ -95,8 +98,8 @@ impl<T: TextureShape> ExactSizeIterator for TextureIterator<T> {}
 /// * all the surfaces with the same mip have matching dimensions
 /// * all the surfaces with mip\[i+1] have dimensions half that of mip\[i]
 ///
-/// TextureShape is implemented with `TextureShapeNode`,  made up of a tree structure.
-/// All other types implementing this trait within this crate wrap that type. 
+/// TextureShape is implemented with [`TextureShapeNode`],  made up of a tree structure.
+/// All other types implementing this trait within this crate wrap that type.
 pub trait TextureShape: Clone + Dimensioned {
     type Surface;
 
@@ -126,60 +129,137 @@ pub trait TextureShape: Clone + Dimensioned {
     }
 
 
-    /// Try to create a new TextureShape from an iterator of surfaces that represents a mip chain.
+    /// Try to create a new texture from an iterator of textures that represents a mipmap.
     /// Returns an error if any of the following are true:
     /// * iter contains no textures
     /// * any of the provided textures already has a mipmap
-    /// * the provided textures do not all have uniform faces, layers, or dimensions
-    /// * the provided textures do not have dimensions matching a mipchain, 
-    /// where each mip has half the dimensions of the last. See `Dimensions::
+    /// * the provided textures do not have uniform faces or layers
+    /// * the provided textures do not have dimensions matching a mipchain,
+    /// where each mip has half the dimensions of the last. See [`Dimensions::mips`]
     fn try_from_mips<I: IntoIterator<Item=Self>>(iter: I) -> ShapeResult<Self>;
 
+    /// Try to create a new texture from an iterator of textures that represents a cubemap.
+    /// Returns an error if any of the following are true:
+    /// * iter contains no textures
+    /// * any of the provided textures already has a cubemap
+    /// * the provided textures do not have uniform mips, layers, or dimensions
+    /// * multiple textures are provided for the same cube face
     fn try_from_faces<I: IntoIterator<Item=(CubemapFace, Self)>>(iter: I) -> ShapeResult<Self>;
 
+    /// Try to create a new texture from an iterator of textures that represents an array
+    /// Returns an error if any of the following are true:
+    /// * iter contains no textures
+    /// * any of the provided textures already has an array
+    /// * the provided textures do not have uniform faces, mips, or dimensions
     fn try_from_layers<I: IntoIterator<Item=Self>>(iter: I) -> ShapeResult<Self>;
 
+    /// Create a new texture with a single surface
     fn from_surface(surface: Self::Surface) -> Self;
+
+    /// Get the number of mips in the texture
     fn mips(&self) -> Option<usize>;
+
+    /// Get the number of layers in the texture
     fn layers(&self) -> Option<usize>;
+
+    /// Get a Vec of the cubemap faces in the texture
     fn faces(&self) -> Option<Vec<CubemapFace>>;
-}
 
-/// An iterator for a TextureShape
-/// Can iterate over faces, layers, or mips
-pub struct TextureIterator<T: TextureShape> {
-    texture: T,
-    current: TextureIndex<usize>,
-    len: usize,
-}
-
-
-impl<T: TextureShape> Iterator for TextureIterator<T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.len > 0 {
-            let next = self.texture.get(self.current);
-            if next.is_some() { return next; }
-
-            self.current = self.current.next();
-            self.len -= 1;
-        }
-        return None;
+    fn try_iter_mips(&self) -> Option<impl Iterator<Item=Self>> {
+        Some((0..self.mips()?)
+            .map(|m| self.get_mip(m).unwrap())
+        )
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.len, Some(self.len))
+    fn try_iter_faces(&self) -> Option<impl Iterator<Item=(CubemapFace, Self)>> {
+        Some(self.faces()?.into_iter()
+            .map(|f| (f, self.get_face(f).unwrap()))
+        )
+    }
+
+    fn try_iter_layers(&self) -> Option<impl Iterator<Item=Self>> {
+        Some((0..self.layers()?)
+            .map(|l| self.get_layer(l).unwrap())
+        )
+    }
+
+    fn iter_mips(&self) -> impl Iterator<Item=(Option<usize>, Self)> {
+        self.try_iter_mips().into_iter().flatten() // either an iterator over mips, or zero length
+            .enumerate() // with mip indices
+            .map(|(m, t)| (Some(m), t)) // transform the mip index into a Some, if any exist
+            .pad_using(1, |_| (None, self.clone())) // ensure at least one item is returned
+    }
+
+    fn iter_faces(&self) -> impl Iterator<Item=(Option<CubemapFace>, Self)> {
+        self.try_iter_faces().into_iter().flatten()  // either an iterator over faces, or zero length
+            .map(|(f, t)| (Some(f), t)) // transform the face into a Some, if any exist
+            .pad_using(1, |_| (None, self.clone())) // ensure at least one item is returned, but with no CubeMapFace
+    }
+
+    fn iter_layers(&self) -> impl Iterator<Item=(Option<usize>, Self)> {
+        self.try_iter_layers().into_iter().flatten() // either an iterator over layers, or zero length
+            .enumerate() // with layer indices
+            .map(|(l, t)| (Some(l), t)) // transform the layer index into a Some, if any exist
+            .pad_using(1, |_| (None, self.clone())) // ensure at least one item is returned
+    }
+
+    fn iter(&self) -> impl Iterator<Item=TextureIterResult<Self::Surface>> {
+        let iter = self.iter_mips();
+
+        let iter = iter.map(|(m, t): (Option<usize>, Self)| {
+            zip(
+                repeat(m),
+                t.iter_faces().collect_vec(),
+            )
+        }).flatten(); // add faces
+
+        let iter = iter.map(|(m, (f, t)): (Option<usize>, (Option<CubemapFace>, Self))| {
+            zip(
+                repeat((m, f)),
+                t.iter_layers().collect_vec(),
+            )
+        }).flatten(); // add layers
+
+        iter.map(|((m, f), (l, t)): ((Option<usize>, Option<CubemapFace>), (Option<usize>, Self))| {
+            TextureIterResult {
+                mip: m,
+                face: f,
+                layer: l,
+                surface: t.try_into_surface().unwrap(),
+            }
+        })
+    }
+
+    fn try_into_surface(self) -> Option<Self::Surface>;
+
+    /// Returns the number of surfaces present in the texture
+    fn len(&self) -> usize {
+        let len = self.mips().unwrap_or(1)
+            * self.layers().unwrap_or(1)
+            * self.faces().map_or(1, |c| c.len());
+
+        assert!(len > 0);
+        len
+    }
+
+    fn is_surface(&self) -> bool {
+        self.len() == 1
     }
 }
-
 
 /// One node of a texture shape data structure
 #[derive(Clone, Debug)]
 pub(crate) enum TextureShapeNode<S: Sized + Clone + Dimensioned> {
+    /// A node representing a texture array
     Array(Vec<Self>),
-    Cube(HashMap<CubemapFace, Self>),
-    MipChain(Vec<Self>),
+
+    /// A node representing a cubemap
+    CubeMap(HashMap<CubemapFace, Self>),
+
+    /// A node representing a mipmap
+    MipMap(Vec<Self>),
+
+    /// A node representing a single surface
     Surface(S),
 }
 
@@ -188,29 +268,31 @@ impl<'a, S> TextureShapeNode<S> where S: Clone + Dimensioned + 'a {
     fn first_inner(&self) -> Self {
         match self {
             TextureShapeNode::Array(l) => { l[0].clone() }
-            TextureShapeNode::Cube(f) => { f.values().next().expect("Cubemap has no faces").clone() }
-            TextureShapeNode::MipChain(m) => { m[0].clone() }
+            TextureShapeNode::CubeMap(f) => { f.values().next().expect("Cubemap has no faces").clone() }
+            TextureShapeNode::MipMap(m) => { m[0].clone() }
             TextureShapeNode::Surface(_) => { self.clone() }
         }
     }
 
+    /// Check for uniformity of a closure result across an iterator
     fn uniformity_check<I, F, T>(iter: I, f: F, s: &'static str) -> ShapeResult
         where I: Iterator<Item=&'a Self>,
-              F: FnMut(&Self) -> Option<T>,
+              F: FnMut(&Self) -> T,
               T: PartialEq {
         if iter.map(f).all_equal() {
-            Err(ShapeError::NonUniformType(s))
+            Err(NonUniform(s))
         } else {
             Ok(())
         }
     }
 
+    /// Check for nesting by iterating over textures and ensuring a closure returns [None]
     fn nesting_check<I, F, T>(iter: I, f: F, s: &'static str) -> ShapeResult
         where I: Iterator<Item=&'a Self>,
               F: FnMut(&Self) -> Option<T>,
               T: PartialEq {
         if iter.map(f).flatten().next().is_some() {
-            Err(ShapeError::Nested(s))
+            Err(Nested(s))
         } else {
             Ok(())
         }
@@ -236,16 +318,16 @@ impl<S> TextureShape for TextureShapeNode<S> where S: Clone + Dimensioned {
         return match (self, index) {
             (TextureShapeNode::Surface { .. }, _) => Some(self.clone()),
 
-            (TextureShapeNode::Cube(faces), TextureIndex::Face(f)) => { Some(faces.get(&f)?.clone()) }
-            (TextureShapeNode::Cube(faces), index) => {
-                Some(TextureShapeNode::Cube(
+            (TextureShapeNode::CubeMap(faces), TextureIndex::Face(f)) => { Some(faces.get(&f)?.clone()) }
+            (TextureShapeNode::CubeMap(faces), index) => {
+                Some(TextureShapeNode::CubeMap(
                     faces.iter()
                         .map(|(i, f)| Some((*i, f.get(index)?)))
                         .collect::<Option<_>>()?
                 ))
             }
 
-            (TextureShapeNode::MipChain(mips), TextureIndex::Mip(m)) => {
+            (TextureShapeNode::MipMap(mips), TextureIndex::Mip(m)) => {
                 let mips = mips.get(m)?.as_slice();
                 match &mips[..] {
                     [single] => {
@@ -253,12 +335,12 @@ impl<S> TextureShape for TextureShapeNode<S> where S: Clone + Dimensioned {
                         Some(single.clone())
                     }
                     [..] => {
-                        Some(TextureShapeNode::MipChain(mips.into()))
+                        Some(TextureShapeNode::MipMap(mips.into()))
                     }
                 }
             }
-            (TextureShapeNode::MipChain(mips), _) => {
-                Some(TextureShapeNode::MipChain(
+            (TextureShapeNode::MipMap(mips), _) => {
+                Some(TextureShapeNode::MipMap(
                     mips.iter()
                         .map(|t| t.get(index))
                         .collect::<Option<_>>()?
@@ -287,50 +369,25 @@ impl<S> TextureShape for TextureShapeNode<S> where S: Clone + Dimensioned {
         };
     }
 
-    fn mips(&self) -> Option<usize> {
-        match self {
-            TextureShapeNode::Surface { .. } => { None }
-            TextureShapeNode::MipChain(v) => { Some(v.len()) }
-            _ => self.first_inner().mips()
-        }
-    }
-
-    fn layers(&self) -> Option<usize> {
-        match self {
-            TextureShapeNode::Surface { .. } => { None }
-            TextureShapeNode::Array(v) => { Some(v.len()) }
-            _ => self.first_inner().layers()
-        }
-    }
-
-
-    fn faces(&self) -> Option<Vec<CubemapFace>> {
-        match self {
-            TextureShapeNode::Surface { .. } => { None }
-            TextureShapeNode::Cube(faces) => { Some(faces.keys().cloned().collect()) }
-            _ => self.first_inner().faces()
-        }
-    }
-
     fn try_from_mips<I: IntoIterator<Item=Self>>(iter: I) -> ShapeResult<Self> {
         let mips = iter.into_iter().collect_vec();
 
         // get dimensions of first mip, while also making sure len > 0
         let dimensions = mips.get(0)
-            .ok_or(ShapeError::Empty("mipchain"))?
+            .ok_or(Empty("mipmap"))?
             .dimensions();
 
         // check that dimensions follow the mip chain
         if !mips.iter().map(Self::dimensions).eq(dimensions.mips()) {
-            return Err(ShapeError::InvalidMipChain);
+            return Err(InvalidMipChain);
         }
 
         // check for non-uniformity and nesting
         Self::uniformity_check(mips.iter(), Self::layers, "layers")?;
         Self::uniformity_check(mips.iter(), Self::faces, "faces")?;
-        Self::nesting_check(mips.iter(), Self::mips, "mipchain")?;
+        Self::nesting_check(mips.iter(), Self::mips, "mipmap")?;
 
-        Ok(Self::MipChain(mips))
+        Ok(Self::MipMap(mips))
     }
 
     fn try_from_faces<I: IntoIterator<Item=(CubemapFace, Self)>>(iter: I) -> ShapeResult<Self> {
@@ -348,19 +405,15 @@ impl<S> TextureShape for TextureShapeNode<S> where S: Clone + Dimensioned {
             return Err(Empty("cube"));
         }
 
-        // Check all faces have the same dimensions
-        faces.values()
-            .map(Self::dimensions)
-            .all_equal_value()
-            .or(Err(NonUniformDimensions))?;
-
         // check for non-uniformity and nesting
+        Self::uniformity_check(faces.values(), Self::dimensions, "dimensions")?;
         Self::uniformity_check(faces.values(), Self::mips, "mips")?;
         Self::uniformity_check(faces.values(), Self::layers, "layers")?;
         Self::nesting_check(faces.values(), Self::faces, "cube")?;
 
-        Ok(Self::Cube(faces))
+        Ok(Self::CubeMap(faces))
     }
+
 
     fn try_from_layers<I: IntoIterator<Item=Self>>(iter: I) -> ShapeResult<Self> {
         let layers = iter.into_iter().collect_vec();
@@ -370,13 +423,8 @@ impl<S> TextureShape for TextureShapeNode<S> where S: Clone + Dimensioned {
             return Err(Empty("array"));
         }
 
-        // Check all faces have the same dimensions
-        layers.iter()
-            .map(Self::dimensions)
-            .all_equal_value()
-            .or(Err(NonUniformDimensions))?;
-
         // check for non-uniformity and nesting
+        Self::uniformity_check(layers.iter(), Self::dimensions, "dimensions")?;
         Self::uniformity_check(layers.iter(), Self::mips, "mips")?;
         Self::uniformity_check(layers.iter(), Self::faces, "faces")?;
         Self::nesting_check(layers.iter(), Self::layers, "array")?;
@@ -386,6 +434,44 @@ impl<S> TextureShape for TextureShapeNode<S> where S: Clone + Dimensioned {
 
     fn from_surface(surface: S) -> Self {
         Self::Surface(surface)
+    }
+
+    fn mips(&self) -> Option<usize> {
+        match self {
+            TextureShapeNode::Surface { .. } => { None }
+            TextureShapeNode::MipMap(v) => { Some(v.len()) }
+            _ => self.first_inner().mips()
+        }
+    }
+
+    fn layers(&self) -> Option<usize> {
+        match self {
+            TextureShapeNode::Surface { .. } => { None }
+            TextureShapeNode::Array(v) => { Some(v.len()) }
+            _ => self.first_inner().layers()
+        }
+    }
+
+    fn faces(&self) -> Option<Vec<CubemapFace>> {
+        match self {
+            TextureShapeNode::Surface { .. } => { None }
+            TextureShapeNode::CubeMap(faces) => { Some(faces.keys().cloned().collect()) }
+            _ => self.first_inner().faces()
+        }
+    }
+
+    fn try_into_surface(self) -> Option<S> {
+        match self {
+            TextureShapeNode::Surface(s) => Some(s),
+            _ => None
+        }
+    }
+
+    fn is_surface(&self) -> bool {
+        match self {
+            TextureShapeNode::Surface(_) => true,
+            _ => false
+        }
     }
 }
 

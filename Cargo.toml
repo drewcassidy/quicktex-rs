@@ -15,7 +15,7 @@ funty = "2.0.0"
 image = "0.25.1"
 itertools = "0.11"
 rayon = "1.7.0"
-strum = { version = "0.25.0", features = ["derive"] }
+strum = { version = "0.26.0", features = ["derive"] }
 thiserror = "1.0.40"
 vector-victor = "0.1.0"
 binrw = "0.13.3"

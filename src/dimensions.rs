@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Dimensions {
     _1D { width: u32 },
     _2D { width: u32, height: u32 },
@@ -41,7 +41,7 @@ impl Dimensions {
         }
     }
 
-    fn mips(self) -> MipDimensionIterator {
+    pub fn mips(self) -> MipDimensionIterator {
         MipDimensionIterator {
             current: Some(self),
         }
@@ -94,11 +94,11 @@ impl TryFrom<Vec<u32>> for Dimensions {
     }
 }
 
-pub(crate) trait Dimensioned {
+pub trait Dimensioned {
     fn dimensions(&self) -> Dimensions;
 }
 
-struct MipDimensionIterator {
+pub struct MipDimensionIterator {
     current: Option<Dimensions>,
 }
 

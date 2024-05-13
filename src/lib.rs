@@ -9,4 +9,5 @@ pub mod format;
 pub mod pack;
 pub mod s3tc;
 pub mod texture;
-pub mod util;
+pub mod shape;
+mod util;

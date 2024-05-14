@@ -36,9 +36,9 @@ pub enum ShapeError {
 type ShapeResult<T = ()> = Result<T, ShapeError>;
 
 /// The face index of one face of a cubemap
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Default, VariantArray)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Default, PartialOrd, Ord, VariantArray)]
 #[repr(usize)]
-pub enum CubemapFace {
+pub enum CubeFace {
     #[default]
     PositiveX,
     NegativeX,
@@ -50,7 +50,7 @@ pub enum CubemapFace {
 
 #[derive(Copy, Clone, Debug, Display)]
 pub enum TextureIndex<I: Sized + Clone + Debug = usize> {
-    Face(CubemapFace),
+    Face(CubeFace),
     Mip(I),
     Layer(I),
 }
@@ -67,10 +67,10 @@ impl TextureIndex<usize> {
             TextureIndex::Face(f) => {
                 let mut face_index = *f as usize;
                 face_index += 1;
-                face_index %= CubemapFace::VARIANTS.len();
+                face_index %= CubeFace::VARIANTS.len();
 
                 TextureIndex::Face(
-                    CubemapFace::VARIANTS[face_index]
+                    CubeFace::VARIANTS[face_index]
                 )
             }
             TextureIndex::Mip(m) => { TextureIndex::Mip(m + 1) }
@@ -81,7 +81,7 @@ impl TextureIndex<usize> {
 
 struct TextureIterResult<S> {
     layer: Option<usize>,
-    face: Option<CubemapFace>,
+    face: Option<CubeFace>,
     mip: Option<usize>,
     surface: S,
 }
@@ -103,25 +103,28 @@ struct TextureIterResult<S> {
 pub trait TextureShape: Clone + Dimensioned {
     type Surface;
 
+    /// Get a texture made of all the surfaces that match the passed index. If there are no matching
+    /// surfaces, or the indexed structure is not present in the texture, this will return [`None`]
     fn get<I>(&self, index: TextureIndex<I>) -> Option<Self>
         where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug;
 
-    /// Get all cubemap faces matching the given face index.
-    /// If `self` does not contain a cube structure, this will return a clone of `self`
-    fn get_face(&self, index: CubemapFace) -> Option<Self> {
-        self.get::<usize>(TextureIndex::Face(index))
-    }
 
     /// Get all array layers matching the given index or range.
-    /// If `self` does not contain an array structure, this will return a clone of `self`
+    /// If `self` does not contain an array structure, or no layers match the index, this will return [`None`]
     fn get_layer<I>(&self, index: I) -> Option<Self>
         where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug
     {
         self.get(TextureIndex::Layer(index))
     }
 
+    /// Get the cubemap face matching the given face index.
+    /// If `self` does not contain a cube structure, or now faces match the index, this will return [`None`]
+    fn get_face(&self, index: CubeFace) -> Option<Self> {
+        self.get::<usize>(TextureIndex::Face(index))
+    }
+
     /// Get all mips matching the given index or range.
-    /// If `self` does not contain a mip structure, this will return a clone of `self`
+    /// If `self` does not contain a mip structure, or no mips match the index, this will return [`None`]
     fn get_mip<I>(&self, index: I) -> Option<Self>
         where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug,
     {
@@ -144,7 +147,7 @@ pub trait TextureShape: Clone + Dimensioned {
     /// * any of the provided textures already has a cubemap
     /// * the provided textures do not have uniform mips, layers, or dimensions
     /// * multiple textures are provided for the same cube face
-    fn try_from_faces<I: IntoIterator<Item=(CubemapFace, Self)>>(iter: I) -> ShapeResult<Self>;
+    fn try_from_faces<I: IntoIterator<Item=(CubeFace, Self)>>(iter: I) -> ShapeResult<Self>;
 
     /// Try to create a new texture from an iterator of textures that represents an array
     /// Returns an error if any of the following are true:
@@ -163,39 +166,36 @@ pub trait TextureShape: Clone + Dimensioned {
     fn layers(&self) -> Option<usize>;
 
     /// Get a Vec of the cubemap faces in the texture
-    fn faces(&self) -> Option<Vec<CubemapFace>>;
+    fn faces(&self) -> Option<Vec<CubeFace>>;
 
-    fn try_iter_mips(&self) -> Option<impl Iterator<Item=Self>> {
-        Some((0..self.mips()?)
-            .map(|m| self.get_mip(m).unwrap())
-        )
-    }
-
-    fn try_iter_faces(&self) -> Option<impl Iterator<Item=(CubemapFace, Self)>> {
-        Some(self.faces()?.into_iter()
-            .map(|f| (f, self.get_face(f).unwrap()))
-        )
-    }
-
+    /// Returns an optional iterator over this texture's layers. if `self` does not contain an
+    /// array structrue this returns [`None`]
     fn try_iter_layers(&self) -> Option<impl Iterator<Item=Self>> {
         Some((0..self.layers()?)
             .map(|l| self.get_layer(l).unwrap())
         )
     }
 
-    fn iter_mips(&self) -> impl Iterator<Item=(Option<usize>, Self)> {
-        self.try_iter_mips().into_iter().flatten() // either an iterator over mips, or zero length
-            .enumerate() // with mip indices
-            .map(|(m, t)| (Some(m), t)) // transform the mip index into a Some, if any exist
-            .pad_using(1, |_| (None, self.clone())) // ensure at least one item is returned
+
+    /// Returns an optional iterator over this texture's faces. If `self` does not contain 
+    /// a cubemap structure this returns [`None`]
+    fn try_iter_faces(&self) -> Option<impl Iterator<Item=(CubeFace, Self)>> {
+        Some(self.faces()?.into_iter()
+            .map(|f| (f, self.get_face(f).unwrap()))
+        )
     }
 
-    fn iter_faces(&self) -> impl Iterator<Item=(Option<CubemapFace>, Self)> {
-        self.try_iter_faces().into_iter().flatten()  // either an iterator over faces, or zero length
-            .map(|(f, t)| (Some(f), t)) // transform the face into a Some, if any exist
-            .pad_using(1, |_| (None, self.clone())) // ensure at least one item is returned, but with no CubeMapFace
+
+    /// Returns an iterator over this texture's mips, if a mipmap structure exists
+    fn try_iter_mips(&self) -> Option<impl Iterator<Item=Self>> {
+        Some((0..self.mips()?)
+            .map(|m| self.get_mip(m).unwrap())
+        )
     }
 
+    /// Iterate over the layers of the texture. 
+    /// If this texture has an array structure, returns each layer along with its index. 
+    /// Otherwise, this iterator returns a single item `(None, self.clone())`
     fn iter_layers(&self) -> impl Iterator<Item=(Option<usize>, Self)> {
         self.try_iter_layers().into_iter().flatten() // either an iterator over layers, or zero length
             .enumerate() // with layer indices
@@ -203,6 +203,28 @@ pub trait TextureShape: Clone + Dimensioned {
             .pad_using(1, |_| (None, self.clone())) // ensure at least one item is returned
     }
 
+    /// Iterate over the cubemap faces of the texture. 
+    /// If this texture has a cubemap structure, returns each face along with its index. 
+    /// Otherwise, this iterator returns a single item `(None, self.clone())`
+    fn iter_faces(&self) -> impl Iterator<Item=(Option<CubeFace>, Self)> {
+        self.try_iter_faces().into_iter().flatten()  // either an iterator over faces, or zero length
+            .map(|(f, t)| (Some(f), t)) // transform the face into a Some, if any exist
+            .pad_using(1, |_| (None, self.clone())) // ensure at least one item is returned, but with no CubeMapFace
+    }
+
+
+    /// Iterate over the mips of the texture. 
+    /// If this texture has a mipmap structure, returns each mip along with its index. 
+    /// Otherwise, this iterator returns a single item `(None, self.clone())`
+    fn iter_mips(&self) -> impl Iterator<Item=(Option<usize>, Self)> {
+        self.try_iter_mips().into_iter().flatten() // either an iterator over mips, or zero length
+            .enumerate() // with mip indices
+            .map(|(m, t)| (Some(m), t)) // transform the mip index into a Some, if any exist
+            .pad_using(1, |_| (None, self.clone())) // ensure at least one item is returned
+    }
+
+    /// Iterate over all the surfaces in the texture, returning the layer, face, and mip index for 
+    /// each one if present
     fn iter(&self) -> impl Iterator<Item=TextureIterResult<Self::Surface>> {
         let iter = self.iter_mips();
 
@@ -213,14 +235,14 @@ pub trait TextureShape: Clone + Dimensioned {
             )
         }).flatten(); // add faces
 
-        let iter = iter.map(|(m, (f, t)): (Option<usize>, (Option<CubemapFace>, Self))| {
+        let iter = iter.map(|(m, (f, t)): (Option<usize>, (Option<CubeFace>, Self))| {
             zip(
                 repeat((m, f)),
                 t.iter_layers().collect_vec(),
             )
         }).flatten(); // add layers
 
-        iter.map(|((m, f), (l, t)): ((Option<usize>, Option<CubemapFace>), (Option<usize>, Self))| {
+        iter.map(|((m, f), (l, t)): ((Option<usize>, Option<CubeFace>), (Option<usize>, Self))| {
             TextureIterResult {
                 mip: m,
                 face: f,
@@ -230,6 +252,7 @@ pub trait TextureShape: Clone + Dimensioned {
         })
     }
 
+    /// Returns this texture as a single surface, if it only has one. Otherwise returns [`None`]
     fn try_into_surface(self) -> Option<Self::Surface>;
 
     /// Returns the number of surfaces present in the texture
@@ -242,8 +265,29 @@ pub trait TextureShape: Clone + Dimensioned {
         len
     }
 
+    /// Returns if this texture represents a single surface
     fn is_surface(&self) -> bool {
         self.len() == 1
+    }
+
+    /// Returns the primary surface of the texture
+    /// This is defined as layer 0, mip 0, and the first cubemap face present, 
+    /// if any, in order of the definition of [`CubeFace`]
+    fn primary(&self) -> Self::Surface {
+        let mut ret = if let Some(mut faces) = self.faces() {
+            faces.sort();
+            match &faces[..] {
+                [first, ..] => { self.get_face(*first).unwrap() }
+                [] => { panic!("Texture has cubemap but no faces") }
+            }
+        } else {
+            self.clone()
+        };
+
+        ret = ret.get_layer(0).unwrap_or(ret);
+        ret = ret.get_mip(0).unwrap_or(ret);
+
+        return ret.try_into_surface().unwrap();
     }
 }
 
@@ -254,7 +298,7 @@ pub(crate) enum TextureShapeNode<S: Sized + Clone + Dimensioned> {
     Array(Vec<Self>),
 
     /// A node representing a cubemap
-    CubeMap(HashMap<CubemapFace, Self>),
+    CubeMap(HashMap<CubeFace, Self>),
 
     /// A node representing a mipmap
     MipMap(Vec<Self>),
@@ -316,7 +360,7 @@ impl<S> TextureShape for TextureShapeNode<S> where S: Clone + Dimensioned {
         where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug
     {
         return match (self, index) {
-            (TextureShapeNode::Surface { .. }, _) => Some(self.clone()),
+            (TextureShapeNode::Surface { .. }, _) => None, // target index was never found :(
 
             (TextureShapeNode::CubeMap(faces), TextureIndex::Face(f)) => { Some(faces.get(&f)?.clone()) }
             (TextureShapeNode::CubeMap(faces), index) => {
@@ -390,7 +434,7 @@ impl<S> TextureShape for TextureShapeNode<S> where S: Clone + Dimensioned {
         Ok(Self::MipMap(mips))
     }
 
-    fn try_from_faces<I: IntoIterator<Item=(CubemapFace, Self)>>(iter: I) -> ShapeResult<Self> {
+    fn try_from_faces<I: IntoIterator<Item=(CubeFace, Self)>>(iter: I) -> ShapeResult<Self> {
         let mut faces = HashMap::new();
 
         // add faces and check for duplicates
@@ -452,7 +496,7 @@ impl<S> TextureShape for TextureShapeNode<S> where S: Clone + Dimensioned {
         }
     }
 
-    fn faces(&self) -> Option<Vec<CubemapFace>> {
+    fn faces(&self) -> Option<Vec<CubeFace>> {
         match self {
             TextureShapeNode::Surface { .. } => { None }
             TextureShapeNode::CubeMap(faces) => { Some(faces.keys().cloned().collect()) }

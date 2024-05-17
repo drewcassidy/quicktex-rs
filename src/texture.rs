@@ -5,6 +5,7 @@
 use std::fmt::Debug;
 use std::rc::Rc;
 use crate::dimensions::{Dimensioned, Dimensions};
+use crate::format::Format;
 use crate::shape::TextureShapeNode;
 
 pub trait Block: Sized {
@@ -40,4 +41,5 @@ impl Dimensioned for Surface {
 #[derive(Clone)]
 pub struct Texture {
     surfaces: TextureShapeNode<Surface>,
+    format: Format,
 }

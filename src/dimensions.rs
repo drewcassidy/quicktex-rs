@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use thiserror::Error;
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Dimensions {
     _1D { width: u32 },
@@ -74,28 +76,52 @@ impl Into<Vec<u32>> for Dimensions {
     }
 }
 
-impl TryFrom<Vec<u32>> for Dimensions {
-    type Error = ();
+#[derive(Error, Debug, Eq, PartialEq)]
+#[error("Dimensions cannot be created with a dimensionality of {0}")]
+pub struct DimensionLengthError(usize);
 
-    fn try_from(value: Vec<u32>) -> Result<Self, Self::Error> {
-        match value.len() {
-            1 => Ok(Dimensions::_1D { width: value[0] }),
-            2 => Ok(Dimensions::_2D {
-                width: value[0],
-                height: value[1],
-            }),
-            3 => Ok(Dimensions::_3D {
-                width: value[0],
-                height: value[1],
-                depth: value[2],
-            }),
-            _ => Err(()),
+impl TryFrom<&[u32]> for Dimensions {
+    type Error = DimensionLengthError;
+
+    fn try_from(value: &[u32]) -> Result<Self, Self::Error> {
+        let value = value.as_ref();
+        match &value[..] {
+            &[width] => Ok(Dimensions::_1D { width }),
+            &[width, height] => Ok(Dimensions::_2D { width, height }),
+            &[width, height, depth] => Ok(Dimensions::_3D { width, height, depth }),
+            _ => Err(DimensionLengthError(value.len())),
         }
     }
 }
 
-pub trait Dimensioned {
-    fn dimensions(&self) -> Dimensions;
+impl TryFrom<Vec<u32>> for Dimensions {
+    type Error = DimensionLengthError;
+    fn try_from(value: Vec<u32>) -> Result<Self, Self::Error> {
+        Self::try_from(&value[..])
+    }
+}
+
+impl<const N: usize> TryFrom<[u32; N]> for Dimensions {
+    type Error = DimensionLengthError;
+
+    fn try_from(value: [u32; N]) -> Result<Self, Self::Error> {
+        match N {
+            1..=3 => Self::try_from(&value[..]),
+            _ => Err(DimensionLengthError(N))
+        }
+    }
+}
+
+#[test]
+fn test_try_from() {
+    assert_eq!(Dimensions::try_from([]), Err(DimensionLengthError(0)));
+    assert_eq!(Dimensions::try_from([1]), Ok(Dimensions::_1D { width: 1 }));
+    assert_eq!(Dimensions::try_from([1, 2]), Ok(Dimensions::_2D { width: 1, height: 2 }));
+    assert_eq!(Dimensions::try_from([1, 2, 4]), Ok(Dimensions::_3D { width: 1, height: 2, depth: 4 }));
+    assert_eq!(Dimensions::try_from([1, 2, 4, 5]), Err(DimensionLengthError(4)));
+
+    assert_eq!(Dimensions::try_from(vec!(3, 4)), Ok(Dimensions::_2D { width: 3, height: 4 }));
+    assert_eq!(Dimensions::try_from(&vec!(3, 4)[..]), Ok(Dimensions::_2D { width: 3, height: 4 }));
 }
 
 pub struct MipDimensionIterator {
@@ -123,3 +149,8 @@ impl Iterator for MipDimensionIterator {
         current
     }
 }
+
+pub trait Dimensioned {
+    fn dimensions(&self) -> Dimensions;
+}
+

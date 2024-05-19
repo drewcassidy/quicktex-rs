@@ -68,7 +68,7 @@ pub enum Caps2 {
 
 use crate::container::dds::Caps2::*;
 use crate::container::dds::DDSError::UnsupportedFormat;
-use crate::format::Format;
+use crate::format::{AlphaFormat, ColorFormat, Format};
 use crate::s3tc::S3TCFormat;
 use crate::shape::{CubeFace, TextureShapeNode};
 
@@ -99,7 +99,7 @@ impl Caps2 {
 
 /// Named tuple containing all "Caps" bitflags
 #[derive(BinRead, BinWrite)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 #[brw(little)]
 pub struct Caps(
     #[br(try_map = BitFlags::from_bits)]
@@ -125,18 +125,15 @@ pub enum PixelFormatFlags {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct PixelFormat {
     #[brw(magic = 32u32)] // Size constant
     #[br(try_map = BitFlags::from_bits)]
     #[bw(map = | bf | bf.bits())]
     flags: BitFlags<PixelFormatFlags>,
     four_cc: [u8; 4],
-    rgb_bit_count: u32,
-    r_bit_mask: u32,
-    g_bit_mask: u32,
-    b_bit_mask: u32,
-    a_bit_mask: u32,
+    bit_count: u32,
+    bit_masks: [u32; 4],
 }
 
 #[derive(BinRead, BinWrite)]
@@ -304,7 +301,7 @@ impl DXGIFormat {
 
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 #[brw(little, magic = b"DDS ")]
 pub struct DDSHeader {
     #[brw(magic = 124u32)] // Size constant
@@ -417,11 +414,46 @@ impl DDSHeader {
                     .dxgi_format.as_format()
             }
             Some(four_cc) => Err(UnsupportedFormat(
-                format!("Unknown FourCC code '{0}'", String::from_utf8_lossy(&four_cc[..])))
+                format!("Unknown FourCC code: '{0}'", String::from_utf8_lossy(&four_cc[..])))
             ),
             None => {
-                Err(UnsupportedFormat(
-                    format!("Unknown pixel Format \n{0:?}", self.pixel_format)))
+                let pixel_format = self.pixel_format.clone();
+                let color_flags = pixel_format.flags | !PixelFormatFlags::AlphaPixels;
+                let has_alpha = pixel_format.flags.intersects(PixelFormatFlags::Alpha | PixelFormatFlags::AlphaPixels);
+
+                let pitch = pixel_format.bit_count as usize;
+
+                let color_format = match color_flags.exactly_one() {
+                    Some(PixelFormatFlags::RGB) => Ok(ColorFormat::RGB {
+                        srgb: false,
+                        bitmasks: pixel_format.bit_masks[0..3].try_into().unwrap(),
+                    }),
+                    Some(PixelFormatFlags::YUV) => Ok(ColorFormat::YUV {
+                        bitmasks: pixel_format.bit_masks[0..3].try_into().unwrap(),
+                    }),
+                    Some(PixelFormatFlags::Luminance) => Ok(ColorFormat::L {
+                        bitmask: pixel_format.bit_masks[0]
+                    }),
+                    Some(PixelFormatFlags::Alpha) | None => Ok(ColorFormat::None),
+                    _ => {
+                        Err(UnsupportedFormat(
+                            format!("Invalid PixelFormat flags: {0:?}", pixel_format.flags)))
+                    }
+                }?;
+
+                let alpha_format = match has_alpha {
+                    true => { AlphaFormat::Custom { bitmask: pixel_format.bit_masks[3] } }
+                    false => { AlphaFormat::Opaque }
+                };
+
+                match (&color_format, &alpha_format) {
+                    (ColorFormat::None, AlphaFormat::Opaque) =>
+                        Err(UnsupportedFormat(
+                            "PixelFormat has neither color nor alpha information".into()
+                        )),
+
+                    _ => Ok(Uncompressed { color_format, alpha_format, pitch })
+                }
             }
         }
     }

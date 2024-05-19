@@ -2,29 +2,36 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use std::fmt::Debug;
 use std::io::{BufRead, Seek};
 use crate::texture::{Texture};
 use thiserror::Error;
+use crate::dimensions::Dimensions;
+use crate::format::Format;
+use crate::shape::CubeFace;
 
 pub mod dds;
 
-
 #[derive(Error, Debug)]
-pub enum ContainerError {
-    #[error("Unexpected signature: '{0}'")]
-    Signature(String),
-
-    #[error("IO Error: {0}")]
-    IO(#[from] std::io::Error),
+enum ContainerError {
+    #[error("Error {0} DDS file: {1}")]
+    DDSError(&'static str, dds::DDSError)
 }
 
-pub(crate) type Result<T, E = ContainerError> = core::result::Result<T, E>;
+trait IntoContainerError: Sized {
+    fn into(self, op: &'static str) -> ContainerError;
+    fn into_read(self) -> ContainerError { self.into("reading") }
+    fn into_write(self) -> ContainerError { self.into("writing") }
+}
 
-trait Container: Sized + Clone {
-    type Header;
+trait ContainerHeader: Sized + Clone + Debug {
+    type Error: IntoContainerError;
 
-    fn load<R: BufRead + Seek>(&self, reader: R) -> Result<Self>;
+    fn read_with<R: BufRead + Seek>(&self, reader: &mut R) -> Result<Texture, Self::Error>;
 
-    fn header(&self) -> &Self::Header;
-    fn texture(&self) -> &Texture;
+    fn dimensions(&self) -> Result<Dimensions, Self::Error>;
+    fn layers(&self) -> Result<Option<usize>, Self::Error>;
+    fn faces(&self) -> Result<Option<Vec<CubeFace>>, Self::Error>;
+    fn mips(&self) -> Result<Option<usize>, Self::Error>;
+    fn format(&self) -> Result<Format, Self::Error>;
 }

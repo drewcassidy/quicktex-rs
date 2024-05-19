@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-#[derive(Clone)]
+use crate::s3tc::S3TCFormat;
+
+#[derive(Clone, Debug)]
 pub enum AlphaFormat {
     /// Any alpha channel content is being used as a 4th channel
     /// and is not intended to represent transparency (straight or premultiplied).
@@ -19,7 +21,7 @@ pub enum AlphaFormat {
     Opaque,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ColorFormat {
     /// RGB color channels
     RGB {
@@ -41,13 +43,16 @@ pub enum ColorFormat {
     None,
 }
 
-#[derive(Clone)]
+struct UncompressedFormat {
+    pitch: usize,
+    color_format: ColorFormat,
+    alpha_format: AlphaFormat,
+
+}
+
+#[derive(Clone, Debug)]
 pub enum Format {
-    BC1 { srgb: bool },
-    BC2 { srgb: bool },
-    BC3 { srgb: bool },
-    BC4 {},
-    BC5 {},
+    S3TC(S3TCFormat),
     Uncompressed {
         pitch: usize,
         color_format: ColorFormat,

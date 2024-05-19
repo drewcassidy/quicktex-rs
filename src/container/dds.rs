@@ -4,6 +4,7 @@
 
 use std::fmt::{Debug, Write};
 use std::io::{BufRead, Read, Seek};
+use binrw::Endian;
 
 use binrw::prelude::*;
 use enumflags2::{bitflags, BitFlags};
@@ -16,10 +17,14 @@ use crate::container::Container;
 use crate::dimensions::Dimensions;
 use crate::texture::Texture;
 
+
 #[derive(Debug, Error)]
 pub enum DDSError {
-    #[error("Error parsing DDS header: {0}")]
-    HeaderError(#[from] binrw::error::Error)
+    #[error("Format error parsing DDS header: {0}")]
+    HeaderError(#[from] binrw::error::Error),
+
+    #[error("Unsupported format: {0}")]
+    UnsupportedFormat(String),
 }
 
 type DDSResult<T = ()> = Result<T, DDSError>;
@@ -62,6 +67,9 @@ pub enum Caps2 {
 }
 
 use crate::container::dds::Caps2::*;
+use crate::container::dds::DDSError::UnsupportedFormat;
+use crate::format::Format;
+use crate::s3tc::S3TCFormat;
 use crate::shape::{CubeFace, TextureShapeNode};
 
 impl Caps2 {
@@ -116,7 +124,7 @@ pub enum PixelFormatFlags {
     Luminance = 0x20000,
 }
 
-#[derive(BinRead, BinWrite)]
+#[binrw]
 #[derive(Debug, Clone)]
 pub struct PixelFormat {
     #[brw(magic = 32u32)] // Size constant
@@ -131,9 +139,8 @@ pub struct PixelFormat {
     a_bit_mask: u32,
 }
 
-
 #[derive(BinRead, BinWrite)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[brw(little, repr = u32)]
 pub enum DXGIFormat {
     Unknown = 0,
@@ -258,7 +265,7 @@ pub enum DXGIFormat {
 }
 
 #[derive(BinRead, BinWrite)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[brw(little, repr = u32)]
 pub enum Dimensionality {
     Texture1D = 2,
@@ -267,7 +274,7 @@ pub enum Dimensionality {
 }
 
 #[derive(BinRead, BinWrite)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[brw(little, repr = u32)]
 pub enum AlphaMode {
     Unknown = 0,
@@ -278,15 +285,21 @@ pub enum AlphaMode {
 }
 
 #[derive(BinRead, BinWrite)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct DX10Header {
-    format: DXGIFormat,
+    dxgi_format: DXGIFormat,
     dimension: Dimensionality,
     #[br(map = | b: u32 | b == 0x4)]
     #[bw(map = | cube | if * cube {0x4u32} else {0x0u32})]
     cube: bool,
     array_size: u32,
     alpha_mode: AlphaMode,
+}
+
+impl DXGIFormat {
+    pub fn as_format(&self) -> DDSResult<Format> {
+        Err(UnsupportedFormat("DX10 header formats are not currently supported".into()))
+    }
 }
 
 
@@ -312,11 +325,11 @@ pub struct DDSHeader {
 }
 
 impl DDSHeader {
-    fn faces(header: &DDSHeader, dx10header: &Option<DX10Header>) -> Option<Vec<CubeFace>> {
-        return match dx10header {
+    pub fn faces(&self) -> Option<Vec<CubeFace>> {
+        return match self.dx10header.clone() {
             None => {
                 // if there's no DX10 header, we read from the caps flags
-                let caps2 = header.caps.1;
+                let caps2 = self.caps.1;
                 if caps2.contains(Cubemap) {
                     Some(caps2.iter().filter_map(Caps2::to_cubemap_face).collect())
                 } else { None }
@@ -331,14 +344,14 @@ impl DDSHeader {
         };
     }
 
-    fn layers(&self) -> Option<u32> {
+    pub fn layers(&self) -> Option<u32> {
         match self.dx10header.clone()?.array_size {
             1 | 0 => None,
             layers => Some(layers)
         }
     }
 
-    fn mips(&self) -> Option<u32> {
+    pub fn mips(&self) -> Option<u32> {
         return match (self.flags.contains(DDSFlags::MipmapCount), self.mipmap_count) {
             (false, _) => None,
             (true, 0) => None,
@@ -346,7 +359,7 @@ impl DDSHeader {
         };
     }
 
-    fn dimensions(&self) -> Dimensions {
+    pub fn dimensions(&self) -> Dimensions {
         return match self.dx10header.clone() {
             None =>
                 if self.flags.contains(DDSFlags::Depth) {
@@ -381,9 +394,69 @@ impl DDSHeader {
                 }
         };
     }
+
+    pub fn format(&self) -> DDSResult<Format> {
+        use S3TCFormat::*;
+        use Format::*;
+
+        // get the fourCC. if the flag for fourCC exists, it will be a Some([u8;4]). otherwise None
+        let four_cc = self.pixel_format.flags.contains(PixelFormatFlags::FourCC)
+            .then_some(&self.pixel_format.four_cc);
+
+        match four_cc {
+            Some(b"DXT1") => Ok(S3TC(BC1 { srgb: false })),
+            Some(b"DXT3") => Ok(S3TC(BC2 { srgb: false })),
+            Some(b"DXT5") => Ok(S3TC(BC3 { srgb: false })),
+            Some(b"BC4U") => Ok(S3TC(BC4 { signed: false })),
+            Some(b"BC4S") => Ok(S3TC(BC4 { signed: true })),
+            Some(b"ATI2") => Ok(S3TC(BC5 { signed: false })),
+            Some(b"BC5S") => Ok(S3TC(BC5 { signed: true })),
+            Some(b"DX10") => {
+                self.dx10header
+                    .ok_or(UnsupportedFormat("FourCC is 'DX10' but no DX10 header was found".into()))?
+                    .dxgi_format.as_format()
+            }
+            Some(four_cc) => Err(UnsupportedFormat(
+                format!("Unknown FourCC code '{0}'", String::from_utf8_lossy(&four_cc[..])))
+            ),
+            None => {
+                Err(UnsupportedFormat(
+                    format!("Unknown pixel Format \n{0:?}", self.pixel_format)))
+            }
+        }
+    }
 }
+
+fn cubemap_order(face: &CubeFace) -> u32 {
+    match face {
+        CubeFace::PositiveX => { 0 }
+        CubeFace::NegativeX => { 1 }
+        CubeFace::PositiveY => { 2 }
+        CubeFace::NegativeY => { 3 }
+        CubeFace::PositiveZ => { 4 }
+        CubeFace::NegativeZ => { 5 }
+    }
+}
+
+fn read_mips(reader: &mut (impl Read + Seek), header: &DDSHeader) {
+    todo!();
+}
+
 
 pub fn read_texture(reader: &mut (impl Read + Seek)) -> DDSResult<Texture> {
     let header = DDSHeader::read(reader)?;
+
+    println!("{header:#?}");
+
+    let format = header.format()?;
+
+    println!("{format:#?}");
+
+
+    if let Some(mut faces) = header.faces() {
+        faces.sort_by_key(|f| cubemap_order(f));
+
+        for face in faces {}
+    }
     todo!()
 }

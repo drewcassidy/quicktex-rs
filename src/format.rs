@@ -43,13 +43,6 @@ pub enum ColorFormat {
     None,
 }
 
-struct UncompressedFormat {
-    pitch: usize,
-    color_format: ColorFormat,
-    alpha_format: AlphaFormat,
-
-}
-
 #[derive(Clone, Debug)]
 pub enum Format {
     S3TC(S3TCFormat),

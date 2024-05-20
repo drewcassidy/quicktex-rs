@@ -130,6 +130,7 @@ pub enum DXGIFormat {
 
 impl DXGIFormat {
     pub fn as_format(&self) -> DDSResult<Format> {
+        // todo!("DX10 header formats are not currently supported");
         Err(UnsupportedFormat("DX10 header formats are not currently supported".into()))
     }
 }

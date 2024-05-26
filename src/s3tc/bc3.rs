@@ -4,7 +4,7 @@
 
 use crate::s3tc::bc1::BC1Block;
 use crate::s3tc::bc4::BC4Block;
-use crate::texture::Block;
+use crate::blocktexture::Block;
 
 pub struct BC3Block(BC1Block, BC4Block);
 

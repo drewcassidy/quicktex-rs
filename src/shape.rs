@@ -33,7 +33,7 @@ pub enum ShapeError {
     Empty(&'static str),
 }
 
-type ShapeResult<T = ()> = Result<T, ShapeError>;
+pub type ShapeResult<T = ()> = Result<T, ShapeError>;
 
 /// The face index of one face of a cubemap
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Default, PartialOrd, Ord, VariantArray)]
@@ -49,13 +49,13 @@ pub enum CubeFace {
 }
 
 #[derive(Copy, Clone, Debug, Display)]
-pub enum TextureIndex<I: Sized + Clone + Debug = usize> {
+pub enum TextureIndex {
     Face(CubeFace),
-    Mip(I),
-    Layer(I),
+    Mip(usize),
+    Layer(usize),
 }
 
-impl TextureIndex<usize> {
+impl TextureIndex {
     /// Return the next index
     ///
     /// For mips and faces, this is just the index + 1.
@@ -105,14 +105,12 @@ pub trait TextureShape: Clone + Dimensioned {
 
     /// Get a texture made of all the surfaces that match the passed index. If there are no matching
     /// surfaces, or the indexed structure is not present in the texture, this will return [`None`]
-    fn get<I>(&self, index: TextureIndex<I>) -> Option<Self>
-        where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug;
+    fn get(&self, index: TextureIndex) -> Option<Self>;
 
 
-    /// Get all array layers matching the given index or range.
+    /// Get all array layers matching the given layer index
     /// If `self` does not contain an array structure, or no layers match the index, this will return [`None`]
-    fn get_layer<I>(&self, index: I) -> Option<Self>
-        where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug
+    fn get_layer(&self, index: usize) -> Option<Self>
     {
         self.get(TextureIndex::Layer(index))
     }
@@ -120,14 +118,12 @@ pub trait TextureShape: Clone + Dimensioned {
     /// Get the cubemap face matching the given face index.
     /// If `self` does not contain a cube structure, or now faces match the index, this will return [`None`]
     fn get_face(&self, index: CubeFace) -> Option<Self> {
-        self.get::<usize>(TextureIndex::Face(index))
+        self.get(TextureIndex::Face(index))
     }
 
-    /// Get all mips matching the given index or range.
+    /// Get all mips matching the given mip index
     /// If `self` does not contain a mip structure, or no mips match the index, this will return [`None`]
-    fn get_mip<I>(&self, index: I) -> Option<Self>
-        where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug,
-    {
+    fn get_mip(&self, index: usize) -> Option<Self> {
         self.get(TextureIndex::Mip(index))
     }
 
@@ -155,9 +151,6 @@ pub trait TextureShape: Clone + Dimensioned {
     /// * any of the provided textures already has an array
     /// * the provided textures do not have uniform faces, mips, or dimensions
     fn try_from_layers<I: IntoIterator<Item=Self>>(iter: I) -> ShapeResult<Self>;
-
-    /// Create a new texture with a single surface
-    fn from_surface(surface: Self::Surface) -> Self;
 
     /// Get the number of mips in the texture
     fn mips(&self) -> Option<usize>;
@@ -309,6 +302,11 @@ pub(crate) enum TextureShapeNode<S: Sized + Clone + Dimensioned> {
 
 
 impl<'a, S> TextureShapeNode<S> where S: Clone + Dimensioned + 'a {
+    /// Create a new texture with a single surface
+    fn from_surface(surface: S) -> Self {
+        Self::Surface(surface)
+    }
+
     fn first_inner(&self) -> Self {
         match self {
             TextureShapeNode::Array(l) => { l[0].clone() }
@@ -324,9 +322,9 @@ impl<'a, S> TextureShapeNode<S> where S: Clone + Dimensioned + 'a {
               F: FnMut(&Self) -> T,
               T: PartialEq {
         if iter.map(f).all_equal() {
-            Err(NonUniform(s))
-        } else {
             Ok(())
+        } else {
+            Err(NonUniform(s))
         }
     }
 
@@ -356,9 +354,7 @@ impl<S> Dimensioned for TextureShapeNode<S> where S: Clone + Dimensioned {
 impl<S> TextureShape for TextureShapeNode<S> where S: Clone + Dimensioned {
     type Surface = S;
 
-    fn get<I>(&self, index: TextureIndex<I>) -> Option<Self>
-        where I: SliceIndex<[Self], Output: AsSlice<Self>> + Copy + Debug
-    {
+    fn get(&self, index: TextureIndex) -> Option<Self> {
         return match (self, index) {
             (TextureShapeNode::Surface { .. }, _) => None, // target index was never found :(
 
@@ -474,10 +470,6 @@ impl<S> TextureShape for TextureShapeNode<S> where S: Clone + Dimensioned {
         Self::nesting_check(layers.iter(), Self::layers, "array")?;
 
         Ok(Self::Array(layers))
-    }
-
-    fn from_surface(surface: S) -> Self {
-        Self::Surface(surface)
     }
 
     fn mips(&self) -> Option<usize> {

@@ -4,7 +4,7 @@
 
 use crate::color::{Color, ColorImpl};
 use crate::pack::{Pack, Unpack};
-use crate::texture::Block;
+use crate::blocktexture::Block;
 use bitvec::prelude::*;
 use std::iter::zip;
 use vector_victor::Matrix;

@@ -6,13 +6,13 @@ use thiserror::Error;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Dimensions {
-    _1D { width: u32 },
-    _2D { width: u32, height: u32 },
-    _3D { width: u32, height: u32, depth: u32 },
+    _1D { width: usize },
+    _2D { width: usize, height: usize },
+    _3D { width: usize, height: usize, depth: usize },
 }
 
 impl Dimensions {
-    fn len(self) -> usize {
+    pub fn len(self) -> usize {
         match self {
             Dimensions::_1D { .. } => 1,
             Dimensions::_2D { .. } => 2,
@@ -20,7 +20,7 @@ impl Dimensions {
         }
     }
 
-    fn width(self) -> u32 {
+    pub fn width(self) -> usize {
         match self {
             Dimensions::_1D { width } => width,
             Dimensions::_2D { width, .. } => width,
@@ -28,7 +28,7 @@ impl Dimensions {
         }
     }
 
-    fn height(self) -> u32 {
+    pub fn height(self) -> usize {
         match self {
             Dimensions::_1D { .. } => 1,
             Dimensions::_2D { height, .. } => height,
@@ -36,11 +36,15 @@ impl Dimensions {
         }
     }
 
-    fn depth(self) -> u32 {
+    pub fn depth(self) -> usize {
         match self {
             Dimensions::_3D { depth, .. } => depth,
             _ => 1,
         }
+    }
+
+    pub fn pixels(self) -> usize {
+        self.into_iter().product::<usize>() as usize
     }
 
     pub fn mips(self) -> MipDimensionIterator {
@@ -52,18 +56,18 @@ impl Dimensions {
 
 impl IntoIterator for Dimensions
     where
-        Self: Into<Vec<u32>>,
+        Self: Into<Vec<usize>>,
 {
-    type Item = u32;
-    type IntoIter = <Vec<u32> as IntoIterator>::IntoIter;
+    type Item = usize;
+    type IntoIter = <Vec<usize> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        Into::<Vec<u32>>::into(self).into_iter()
+        Into::<Vec<usize>>::into(self).into_iter()
     }
 }
 
-impl Into<Vec<u32>> for Dimensions {
-    fn into(self) -> Vec<u32> {
+impl Into<Vec<usize>> for Dimensions {
+    fn into(self) -> Vec<usize> {
         match self {
             Dimensions::_1D { width } => vec![width],
             Dimensions::_2D { width, height } => vec![width, height],
@@ -80,10 +84,10 @@ impl Into<Vec<u32>> for Dimensions {
 #[error("Dimensions cannot be created with a dimensionality of {0}")]
 pub struct DimensionLengthError(usize);
 
-impl TryFrom<&[u32]> for Dimensions {
+impl TryFrom<&[usize]> for Dimensions {
     type Error = DimensionLengthError;
 
-    fn try_from(value: &[u32]) -> Result<Self, Self::Error> {
+    fn try_from(value: &[usize]) -> Result<Self, Self::Error> {
         let value = value.as_ref();
         match &value[..] {
             &[width] => Ok(Dimensions::_1D { width }),
@@ -94,17 +98,17 @@ impl TryFrom<&[u32]> for Dimensions {
     }
 }
 
-impl TryFrom<Vec<u32>> for Dimensions {
+impl TryFrom<Vec<usize>> for Dimensions {
     type Error = DimensionLengthError;
-    fn try_from(value: Vec<u32>) -> Result<Self, Self::Error> {
+    fn try_from(value: Vec<usize>) -> Result<Self, Self::Error> {
         Self::try_from(&value[..])
     }
 }
 
-impl<const N: usize> TryFrom<[u32; N]> for Dimensions {
+impl<const N: usize> TryFrom<[usize; N]> for Dimensions {
     type Error = DimensionLengthError;
 
-    fn try_from(value: [u32; N]) -> Result<Self, Self::Error> {
+    fn try_from(value: [usize; N]) -> Result<Self, Self::Error> {
         match N {
             1..=3 => Self::try_from(&value[..]),
             _ => Err(DimensionLengthError(N))
@@ -138,7 +142,7 @@ impl Iterator for MipDimensionIterator {
         if next.iter().all(|&x| x <= 1) {
             self.current = None; // after mips are all 1, the chain terminates
         } else {
-            let next: Vec<_> = next.into_iter().map(|x| u32::max(x / 2, 1)).collect();
+            let next: Vec<_> = next.into_iter().map(|x| usize::max(x / 2, 1)).collect();
 
             self.current = Some(
                 next.try_into()

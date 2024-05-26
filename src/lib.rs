@@ -11,3 +11,4 @@ pub mod s3tc;
 pub mod texture;
 pub mod shape;
 mod util;
+mod blocktexture;

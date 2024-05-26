@@ -3,7 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use crate::s3tc::bc4::BC4Block;
-use crate::texture::Block;
+use crate::blocktexture::Block;
 
 pub struct BC5Block(BC4Block, BC4Block);
 

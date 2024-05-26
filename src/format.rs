@@ -2,9 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use crate::dimensions::Dimensions;
 use crate::s3tc::S3TCFormat;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AlphaFormat {
     /// Any alpha channel content is being used as a 4th channel
     /// and is not intended to represent transparency (straight or premultiplied).
@@ -21,7 +22,7 @@ pub enum AlphaFormat {
     Opaque,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ColorFormat {
     /// RGB color channels
     RGB {
@@ -43,7 +44,7 @@ pub enum ColorFormat {
     None,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Format {
     S3TC(S3TCFormat),
     Uncompressed {
@@ -56,4 +57,13 @@ pub enum Format {
     // * Basis and other super compression schemes (would contain a boxed format for the inner)
     // * Video formats like YUV 4:2:2, but I don't think anyone actually uses these.
     // UNORM/UINT/SNORM/SINT/FLOAT? even if its just for round trip
+}
+
+impl Format {
+    pub fn size_for(&self, dimensions: Dimensions) -> usize {
+        match self {
+            Format::S3TC(s) => { s.size_for(dimensions) }
+            Format::Uncompressed { pitch, .. } => { *pitch * dimensions.pixels() }
+        }
+    }
 }

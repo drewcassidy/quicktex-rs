@@ -3,7 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use crate::pack::{Pack, Unpack};
-use crate::texture::Block;
+use crate::blocktexture::Block;
 use bitvec::prelude::*;
 use std::iter::zip;
 use vector_victor::Matrix;

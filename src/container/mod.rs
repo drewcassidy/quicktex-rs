@@ -3,7 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use std::fmt::Debug;
-use std::io::{BufRead, Seek};
+use std::io::{BufRead, Read, Seek};
 use crate::texture::{Texture};
 use thiserror::Error;
 use crate::dimensions::Dimensions;
@@ -13,12 +13,12 @@ use crate::shape::CubeFace;
 pub mod dds;
 
 #[derive(Error, Debug)]
-enum ContainerError {
-    #[error("Error {0} DDS file: {1}")]
-    DDSError(&'static str, dds::DDSError)
+pub enum ContainerError {
+    #[error("Error {1} DDS file: {0}")]
+    DDSError(dds::DDSError, &'static str)
 }
 
-trait IntoContainerError: Sized {
+pub trait IntoContainerError: Sized {
     fn into(self, op: &'static str) -> ContainerError;
     fn into_read(self) -> ContainerError { self.into("reading") }
     fn into_write(self) -> ContainerError { self.into("writing") }
@@ -27,7 +27,7 @@ trait IntoContainerError: Sized {
 trait ContainerHeader: Sized + Clone + Debug {
     type Error: IntoContainerError;
 
-    fn read_with<R: BufRead + Seek>(&self, reader: &mut R) -> Result<Texture, Self::Error>;
+    fn read_with<R: Read + Seek>(&self, reader: &mut R) -> Result<Texture, Self::Error>;
 
     fn dimensions(&self) -> Result<Dimensions, Self::Error>;
     fn layers(&self) -> Result<Option<usize>, Self::Error>;

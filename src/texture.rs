@@ -2,21 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::fmt::Debug;
-use std::io::{Read, Seek};
+use std::fmt::{Debug, Formatter};
+use std::io::Read;
 use std::rc::Rc;
-use std::slice::SliceIndex;
-use image::codecs::png::CompressionType::Default;
+
 use itertools::Itertools;
+
 use crate::dimensions::{Dimensioned, Dimensions};
 use crate::format::Format;
-use crate::shape::{CubeFace, ShapeError, ShapeResult, TextureIndex, TextureShape, TextureShapeNode};
-use crate::util::AsSlice;
+use crate::shape::{CubeFace, ShapeError, TextureIndex, TextureShape, TextureShapeNode};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Surface {
     dimensions: Dimensions,
     buffer: Rc<[u8]>,
+}
+
+impl Debug for Surface {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(format!("{:?} surface with {} bytes", self.dimensions, self.buffer.len()).as_str())
+    }
 }
 
 

@@ -2,14 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use std::fmt::{Debug, format, Formatter, Write};
 use thiserror::Error;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Dimensions {
     _1D { width: usize },
     _2D { width: usize, height: usize },
     _3D { width: usize, height: usize, depth: usize },
 }
+
 
 impl Dimensions {
     pub fn len(self) -> usize {
@@ -50,6 +52,16 @@ impl Dimensions {
     pub fn mips(self) -> MipDimensionIterator {
         MipDimensionIterator {
             current: Some(self),
+        }
+    }
+}
+
+impl Debug for Dimensions {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Dimensions::_1D { width } => { f.write_str(format!("{width} wide").as_str()) }
+            Dimensions::_2D { width, height } => { f.write_str(format!("{width}x{height}").as_str()) }
+            Dimensions::_3D { width, height, depth } => { f.write_str(format!("{width}x{height}x{depth}").as_str()) }
         }
     }
 }

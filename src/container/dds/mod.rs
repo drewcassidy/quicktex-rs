@@ -13,6 +13,7 @@ use strum::VariantArray;
 use thiserror::Error;
 
 use crate::container::{ContainerError, ContainerHeader, IntoContainerError};
+use crate::container::dds::DDSError::{HeaderError, ParseError};
 use crate::container::dds::dx10_header::{Dimensionality, DX10Header};
 use crate::container::dds::pixel_format::{FourCC, PixelFormat};
 use crate::dimensions::Dimensions;
@@ -25,8 +26,11 @@ mod dx10_header;
 
 #[derive(Debug, Error)]
 pub enum DDSError {
-    #[error("Format error parsing DDS header: {0}")]
-    HeaderError(#[from] binrw::error::Error),
+    #[error("Error parsing DDS header: {0}")]
+    ParseError(#[from] binrw::error::Error),
+
+    #[error("Invalid DDS Header: {0}")]
+    HeaderError(String),
 
     #[error("Unsupported format: {0}")]
     UnsupportedFormat(String),
@@ -51,21 +55,9 @@ fn cubemap_order(face: &CubeFace) -> u32 {
 
 pub fn read_texture(reader: &mut (impl Read + Seek)) -> DDSResult<Texture> {
     let header = DDSHeader::read(reader)?;
-
     println!("{header:#?}");
-
-    let format = header.format()?;
     let texture = header.read_with(reader)?;
-
-    println!("{texture:#?}");
-
-
-    if let Some(mut faces) = header.faces()? {
-        faces.sort_by_key(|f| cubemap_order(f));
-
-        for face in faces {}
-    }
-    todo!()
+    Ok(texture)
 }
 
 #[bitflags]
@@ -75,9 +67,9 @@ pub enum DDSFlags {
     Caps = 0x1,
     Height = 0x2,
     Width = 0x4,
-    pub(crate) Pitch = 0x8,
+    Pitch = 0x8,
     PixelFormat = 0x1000,
-    pub(crate) MipmapCount = 0x20000,
+    MipmapCount = 0x20000,
     LinearSize = 0x80000,
     Depth = 0x800000,
 }
@@ -286,11 +278,11 @@ impl ContainerHeader for DDSHeader {
     }
 
     fn mips(&self) -> DDSResult<Option<usize>> {
-        Ok(match (self.flags.contains(DDSFlags::MipmapCount), self.mipmap_count) {
-            (false, _) => None,
-            (true, 0) => None,
-            (true, mips) => Some(mips as usize)
-        })
+        match (self.flags.contains(DDSFlags::MipmapCount), self.mipmap_count) {
+            (false, _) => Ok(None),
+            (true, 0) => Err(HeaderError("MipmapCount flag is present, but MipmapCount is 0".into())),
+            (true, mips) => Ok(Some(mips as usize))
+        }
     }
 
     fn format(&self) -> DDSResult<Format> {

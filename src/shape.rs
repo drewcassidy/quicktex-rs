@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::{repeat, zip};
+use std::rc::Rc;
 use std::slice::SliceIndex;
 
 use itertools::Itertools;

@@ -95,7 +95,7 @@ impl PixelFormat {
         let color_flags = self.flags & !PixelFormatFlags::AlphaPixels;
         let has_alpha = self.flags.intersects(PixelFormatFlags::Alpha | PixelFormatFlags::AlphaPixels);
 
-        let pitch = self.bit_count as usize;
+        let pitch = (self.bit_count / 8) as usize;
 
         let color_format = match color_flags.exactly_one() {
             Some(PixelFormatFlags::RGB) => Ok(ColorFormat::RGB {

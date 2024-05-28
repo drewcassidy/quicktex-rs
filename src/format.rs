@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use std::fmt::Debug;
 use crate::dimensions::Dimensions;
-use crate::s3tc::S3TCFormat;
+
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AlphaFormat {
@@ -46,7 +47,11 @@ pub enum ColorFormat {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Format {
-    S3TC(S3TCFormat),
+    BC1 { srgb: bool },
+    BC2 { srgb: bool },
+    BC3 { srgb: bool },
+    BC4 { signed: bool },
+    BC5 { signed: bool },
     Uncompressed {
         pitch: usize,
         color_format: ColorFormat,
@@ -61,9 +66,17 @@ pub enum Format {
 
 impl Format {
     pub fn size_for(&self, dimensions: Dimensions) -> usize {
+        use Format::*;
         match self {
-            Format::S3TC(s) => { s.size_for(dimensions) }
-            Format::Uncompressed { pitch, .. } => { *pitch * dimensions.pixels() }
+            BC1 { .. } | BC4 { .. } => {
+                8 * dimensions.blocks(Dimensions::_2D([4, 4])).product() as usize
+            }
+            BC2 { .. } | BC3 { .. } | BC5 { .. } => {
+                16 * dimensions.blocks(Dimensions::_2D([4, 4])).product() as usize
+            }
+            Uncompressed { pitch, .. } => {
+                *pitch * dimensions.product() as usize
+            }
         }
     }
 }

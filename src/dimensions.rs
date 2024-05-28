@@ -3,50 +3,55 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use std::fmt::{Debug, format, Formatter, Write};
+use std::iter::zip;
+use std::num::NonZeroU32;
+use std::ops::Deref;
+use itertools::Itertools;
 use thiserror::Error;
+use crate::util::AsSlice;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Dimensions {
-    _1D { width: usize },
-    _2D { width: usize, height: usize },
-    _3D { width: usize, height: usize, depth: usize },
+    _1D(u32),
+    _2D([u32; 2]),
+    _3D([u32; 3]),
 }
 
 
 impl Dimensions {
     pub fn len(self) -> usize {
         match self {
-            Dimensions::_1D { .. } => 1,
-            Dimensions::_2D { .. } => 2,
-            Dimensions::_3D { .. } => 3,
+            Dimensions::_1D(_) => 1,
+            Dimensions::_2D(_) => 2,
+            Dimensions::_3D(_) => 3,
         }
     }
 
-    pub fn width(self) -> usize {
+    pub fn width(self) -> u32 {
         match self {
-            Dimensions::_1D { width } => width,
-            Dimensions::_2D { width, .. } => width,
-            Dimensions::_3D { width, .. } => width,
+            Dimensions::_1D(width) => width,
+            Dimensions::_2D([width, ..]) => width,
+            Dimensions::_3D([width, ..]) => width,
         }
     }
 
-    pub fn height(self) -> usize {
+    pub fn height(self) -> u32 {
         match self {
-            Dimensions::_1D { .. } => 1,
-            Dimensions::_2D { height, .. } => height,
-            Dimensions::_3D { height, .. } => height,
+            Dimensions::_1D(_) => 1,
+            Dimensions::_2D([_, height]) => height,
+            Dimensions::_3D([_, height, _]) => height,
         }
     }
 
-    pub fn depth(self) -> usize {
+    pub fn depth(self) -> u32 {
         match self {
-            Dimensions::_3D { depth, .. } => depth,
+            Dimensions::_3D([.., depth]) => depth,
             _ => 1,
         }
     }
 
-    pub fn pixels(self) -> usize {
-        self.into_iter().product::<usize>() as usize
+    pub fn product(self) -> u32 {
+        self.into_iter().product::<u32>()
     }
 
     pub fn mips(self) -> MipDimensionIterator {
@@ -54,41 +59,56 @@ impl Dimensions {
             current: Some(self),
         }
     }
+
+    pub fn blocks(self, bdimensions: Dimensions) -> Dimensions {
+        let rounding_divide = |(size, bsize)| -> u32 {
+            (size + (bsize - 1)) / bsize
+        };
+
+        let result_vec = self.into_iter()
+            .zip_longest(bdimensions.into_iter())
+            .map(|b| rounding_divide(b.or_else(|| 1, || 1)))
+            .collect_vec();
+
+        result_vec.try_into().expect("Dimensions somehow changed size")
+    }
 }
 
 impl Debug for Dimensions {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Dimensions::_1D { width } => { f.write_str(format!("{width} wide").as_str()) }
-            Dimensions::_2D { width, height } => { f.write_str(format!("{width}x{height}").as_str()) }
-            Dimensions::_3D { width, height, depth } => { f.write_str(format!("{width}x{height}x{depth}").as_str()) }
+            Dimensions::_1D(width) => { f.write_str(format!("{width} wide").as_str()) }
+            Dimensions::_2D([width, height]) => { f.write_str(format!("{width}x{height}").as_str()) }
+            Dimensions::_3D([width, height, depth]) => { f.write_str(format!("{width}x{height}x{depth}").as_str()) }
         }
     }
 }
 
 impl IntoIterator for Dimensions
     where
-        Self: Into<Vec<usize>>,
+        Self: Into<Vec<u32>>,
 {
-    type Item = usize;
-    type IntoIter = <Vec<usize> as IntoIterator>::IntoIter;
+    type Item = u32;
+    type IntoIter = <Vec<u32> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        Into::<Vec<usize>>::into(self).into_iter()
+        Into::<Vec<u32>>::into(self).into_iter()
     }
 }
 
-impl Into<Vec<usize>> for Dimensions {
-    fn into(self) -> Vec<usize> {
+impl AsRef<[u32]> for Dimensions {
+    fn as_ref(&self) -> &[u32] {
         match self {
-            Dimensions::_1D { width } => vec![width],
-            Dimensions::_2D { width, height } => vec![width, height],
-            Dimensions::_3D {
-                width,
-                height,
-                depth,
-            } => vec![width, depth, height],
+            Dimensions::_1D(width) => { width.as_slice() }
+            Dimensions::_2D(v) => { &v[..] }
+            Dimensions::_3D(v) => { &v[..] }
         }
+    }
+}
+
+impl Into<Vec<u32>> for Dimensions {
+    fn into(self) -> Vec<u32> {
+        self.as_ref().into()
     }
 }
 
@@ -96,48 +116,45 @@ impl Into<Vec<usize>> for Dimensions {
 #[error("Dimensions cannot be created with a dimensionality of {0}")]
 pub struct DimensionLengthError(usize);
 
-impl TryFrom<&[usize]> for Dimensions {
+impl TryFrom<&[u32]> for Dimensions {
     type Error = DimensionLengthError;
 
-    fn try_from(value: &[usize]) -> Result<Self, Self::Error> {
-        let value = value.as_ref();
-        match &value[..] {
-            &[width] => Ok(Dimensions::_1D { width }),
-            &[width, height] => Ok(Dimensions::_2D { width, height }),
-            &[width, height, depth] => Ok(Dimensions::_3D { width, height, depth }),
-            _ => Err(DimensionLengthError(value.len())),
+    fn try_from(value: &[u32]) -> Result<Self, Self::Error> {
+        match value.len() {
+            1 => Ok(Dimensions::_1D(value[0])),
+            2 => Ok(Dimensions::_2D(value.try_into().unwrap())),
+            3 => Ok(Dimensions::_3D(value.try_into().unwrap())),
+            l => Err(DimensionLengthError(l)),
         }
     }
 }
 
-impl TryFrom<Vec<usize>> for Dimensions {
+impl TryFrom<Vec<u32>> for Dimensions {
     type Error = DimensionLengthError;
-    fn try_from(value: Vec<usize>) -> Result<Self, Self::Error> {
+    fn try_from(value: Vec<u32>) -> Result<Self, Self::Error> {
         Self::try_from(&value[..])
     }
 }
 
-impl<const N: usize> TryFrom<[usize; N]> for Dimensions {
+impl<const N: usize> TryFrom<[u32; N]> for Dimensions {
     type Error = DimensionLengthError;
 
-    fn try_from(value: [usize; N]) -> Result<Self, Self::Error> {
-        match N {
-            1..=3 => Self::try_from(&value[..]),
-            _ => Err(DimensionLengthError(N))
-        }
+    fn try_from(value: [u32; N]) -> Result<Self, Self::Error> {
+        Self::try_from(&value[..])
     }
 }
+
 
 #[test]
 fn test_try_from() {
     assert_eq!(Dimensions::try_from([]), Err(DimensionLengthError(0)));
-    assert_eq!(Dimensions::try_from([1]), Ok(Dimensions::_1D { width: 1 }));
-    assert_eq!(Dimensions::try_from([1, 2]), Ok(Dimensions::_2D { width: 1, height: 2 }));
-    assert_eq!(Dimensions::try_from([1, 2, 4]), Ok(Dimensions::_3D { width: 1, height: 2, depth: 4 }));
+    assert_eq!(Dimensions::try_from([1]), Ok(Dimensions::_1D(1)));
+    assert_eq!(Dimensions::try_from([1, 2]), Ok(Dimensions::_2D([1, 2])));
+    assert_eq!(Dimensions::try_from([1, 2, 4]), Ok(Dimensions::_3D([1, 2, 4])));
     assert_eq!(Dimensions::try_from([1, 2, 4, 5]), Err(DimensionLengthError(4)));
 
-    assert_eq!(Dimensions::try_from(vec!(3, 4)), Ok(Dimensions::_2D { width: 3, height: 4 }));
-    assert_eq!(Dimensions::try_from(&vec!(3, 4)[..]), Ok(Dimensions::_2D { width: 3, height: 4 }));
+    assert_eq!(Dimensions::try_from(vec!(3, 4)), Ok(Dimensions::_2D([3, 4])));
+    assert_eq!(Dimensions::try_from(&vec!(3, 4)[..]), Ok(Dimensions::_2D([3, 4])));
 }
 
 pub struct MipDimensionIterator {
@@ -154,7 +171,7 @@ impl Iterator for MipDimensionIterator {
         if next.iter().all(|&x| x <= 1) {
             self.current = None; // after mips are all 1, the chain terminates
         } else {
-            let next: Vec<_> = next.into_iter().map(|x| usize::max(x / 2, 1)).collect();
+            let next: Vec<_> = next.into_iter().map(|x| u32::max(x / 2, 1)).collect();
 
             self.current = Some(
                 next.try_into()

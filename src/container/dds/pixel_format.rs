@@ -4,8 +4,6 @@ use enumflags2::{BitFlags, bitflags};
 use crate::container::dds::DDSError::UnsupportedFormat;
 use crate::container::dds::DDSResult;
 use crate::format::{AlphaFormat, ColorFormat, Format};
-use crate::format::Format::S3TC;
-use crate::s3tc::S3TCFormat::{BC1, BC2, BC3, BC4, BC5};
 
 #[bitflags]
 #[repr(u32)]
@@ -27,15 +25,16 @@ impl FourCC {
     /// Convert this FourCC to a Format. Returns None if the four_cc is "DX10", meaning the
     /// actual format is stored elsewhere in the DDS header
     fn as_format(&self) -> DDSResult<Option<Format>> {
+        use crate::format::Format::*;
         match &self.0 {
-            b"DX10" => { Ok(None) }
-            b"DXT1" => Ok(Some(S3TC(BC1 { srgb: false }))),
-            b"DXT3" => Ok(Some(S3TC(BC2 { srgb: false }))),
-            b"DXT5" => Ok(Some(S3TC(BC3 { srgb: false }))),
-            b"BC4U" => Ok(Some(S3TC(BC4 { signed: false }))),
-            b"BC4S" => Ok(Some(S3TC(BC4 { signed: true }))),
-            b"ATI2" => Ok(Some(S3TC(BC5 { signed: false }))),
-            b"BC5S" => Ok(Some(S3TC(BC5 { signed: true }))),
+            b"DX10" => { Ok(None) } // DX10 header must be stored elsewhere
+            b"DXT1" => Ok(Some(BC1 { srgb: false })), // DXT1, AKA BC1
+            b"DXT3" => Ok(Some(BC2 { srgb: false })), // DXT3, AKA BC2
+            b"DXT5" => Ok(Some(BC3 { srgb: false })), // DXT5, AKA BC3
+            b"BC4U" => Ok(Some(BC4 { signed: false })), // BC4 Unsigned
+            b"BC4S" => Ok(Some(BC4 { signed: true })), // BC4 Signed
+            b"ATI2" => Ok(Some(BC5 { signed: false })), // BC5 Unsigned
+            b"BC5S" => Ok(Some(BC5 { signed: true })), // BC5 Signed
             four_cc => Err(UnsupportedFormat(
                 format!("Unknown FourCC code: '{four_cc:?}'", )
             )),

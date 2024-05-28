@@ -219,34 +219,18 @@ impl ContainerHeader for DDSHeader {
         Ok(match self.dx10header.clone() {
             None =>
                 if self.flags.contains(DDSFlags::Depth) {
-                    Dimensions::_3D {
-                        width: self.width as usize,
-                        height: self.height as usize,
-                        depth: self.depth as usize,
-                    }
+                    Dimensions::_3D([self.width, self.height, self.depth])
                 } else {
-                    Dimensions::_2D {
-                        width: self.width as usize,
-                        height: self.height as usize,
-                    }
+                    Dimensions::_2D([self.width, self.height])
                 }
 
             Some(dx10header) =>
                 match dx10header.dimensionality {
-                    Dimensionality::Texture1D => Dimensions::_1D {
-                        width: self.width as usize
-                    },
+                    Dimensionality::Texture1D => Dimensions::_1D(self.width),
 
-                    Dimensionality::Texture2D => Dimensions::_2D {
-                        width: self.width as usize,
-                        height: self.height as usize,
-                    },
+                    Dimensionality::Texture2D => Dimensions::_2D([self.width, self.height]),
 
-                    Dimensionality::Texture3D => Dimensions::_3D {
-                        width: self.width as usize,
-                        height: self.height as usize,
-                        depth: self.depth as usize,
-                    },
+                    Dimensionality::Texture3D => Dimensions::_3D([self.width, self.height, self.depth])
                 }
         })
     }

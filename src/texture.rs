@@ -8,12 +8,12 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use thiserror::Error;
-use crate::container::dds::DDSError;
 
 use crate::dimensions::{Dimensioned, Dimensions};
 use crate::format::Format;
 use crate::shape::{CubeFace, ShapeError, TextureIndex, TextureShape, TextureShapeNode};
 
+/// A single surface of a [`Texture`], consisting of dimensions and a buffer of bytes
 #[derive(Clone)]
 pub struct Surface {
     dimensions: Dimensions,
@@ -32,6 +32,7 @@ impl Dimensioned for Surface {
 }
 
 
+/// Struct to simplify reading a texture from a file
 pub struct TextureReader<'a, R: Read> {
     pub format: Format,
     pub reader: &'a mut R,
@@ -39,16 +40,17 @@ pub struct TextureReader<'a, R: Read> {
 
 #[derive(Error, Debug)]
 pub enum TextureError {
-    #[error("IO Error reading Texture: {0}")]
+    #[error("IO Error: {0}")]
     IO(#[from] std::io::Error),
 
-    #[error("Shape error constructing Texture: {0}")]
+    #[error("Shape Error: {0}")]
     Shape(#[from] ShapeError),
 }
 
 type TextureResult<T = Texture> = Result<T, TextureError>;
 
 impl<'a, R: Read> TextureReader<'a, R> {
+    /// Read a single surface from a binary reader using the given dimensions
     pub fn read_surface(&mut self, dimensions: Dimensions) -> TextureResult
     {
         let size = self.format.size_for(dimensions);
@@ -61,6 +63,7 @@ impl<'a, R: Read> TextureReader<'a, R> {
         return Ok(Texture { format: self.format, surfaces });
     }
 
+    /// Construct a mipmap out of the textures produced by `inner`, or short circuit to `inner` if `mip_count` is [`None`]
     pub fn read_mips<F>(&mut self, dimensions: Dimensions, mip_count: Option<usize>, mut inner: F) -> TextureResult
         where F: FnMut(&mut Self, Dimensions) -> TextureResult
     {
@@ -74,6 +77,7 @@ impl<'a, R: Read> TextureReader<'a, R> {
         }
     }
 
+    /// Construct a cubemap out of the textures produced by `inner`, or short circuit to `inner` if `faces` is [`None`]
     pub fn read_faces<F>(&mut self, dimensions: Dimensions, faces: Option<Vec<CubeFace>>, mut inner: F) -> TextureResult
         where F: FnMut(&mut Self, Dimensions) -> TextureResult
     {
@@ -89,6 +93,7 @@ impl<'a, R: Read> TextureReader<'a, R> {
         }
     }
 
+    /// Construct an array out of the textures produced by `inner`, or short circuit to `inner` if `layer_count` is [`None`]
     pub fn read_layers<F>(&mut self, dimensions: Dimensions, layer_count: Option<usize>, mut inner: F) -> TextureResult
         where F: FnMut(&mut Self, Dimensions) -> TextureResult
     {
@@ -103,6 +108,7 @@ impl<'a, R: Read> TextureReader<'a, R> {
     }
 }
 
+/// An encoded texture, consisting of a [`Format`] and one or more [`Surface`]s
 #[derive(Clone, Debug)]
 pub struct Texture {
     format: Format,

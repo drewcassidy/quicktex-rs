@@ -7,6 +7,8 @@ use std::io::Read;
 use std::rc::Rc;
 
 use itertools::Itertools;
+use thiserror::Error;
+use crate::container::dds::DDSError;
 
 use crate::dimensions::{Dimensioned, Dimensions};
 use crate::format::Format;
@@ -29,25 +31,82 @@ impl Dimensioned for Surface {
     fn dimensions(&self) -> Dimensions { self.dimensions }
 }
 
-#[derive(Clone, Debug)]
-pub struct Texture {
-    format: Format,
-    surfaces: TextureShapeNode<Surface>,
+
+pub struct TextureReader<'a, R: Read> {
+    pub format: Format,
+    pub reader: &'a mut R,
 }
 
-impl Texture {
-    pub fn read_surface<T>(reader: &mut T, dimensions: Dimensions, format: Format) -> Result<Self, std::io::Error>
-        where T: Read + Sized
+#[derive(Error, Debug)]
+pub enum TextureError {
+    #[error("IO Error reading Texture: {0}")]
+    IO(#[from] std::io::Error),
+
+    #[error("Shape error constructing Texture: {0}")]
+    Shape(#[from] ShapeError),
+}
+
+type TextureResult<T = Texture> = Result<T, TextureError>;
+
+impl<'a, R: Read> TextureReader<'a, R> {
+    pub fn read_surface(&mut self, dimensions: Dimensions) -> TextureResult
     {
-        let size = format.size_for(dimensions);
+        let size = self.format.size_for(dimensions);
         let mut buffer: Vec<u8> = vec![0; size];
-        reader.read_exact(&mut buffer[..])?; // read into the vec buffer
+        self.reader.read_exact(&mut buffer[..])?; // read into the vec buffer
         let buffer = Rc::<[u8]>::from(buffer); // move buffer contents into an RC without copying
 
         let surfaces = TextureShapeNode::Surface(Surface { dimensions, buffer });
 
-        return Ok(Texture { format, surfaces });
+        return Ok(Texture { format: self.format, surfaces });
     }
+
+    pub fn read_mips<F>(&mut self, dimensions: Dimensions, mip_count: Option<usize>, mut inner: F) -> TextureResult
+        where F: FnMut(&mut Self, Dimensions) -> TextureResult
+    {
+        if let Some(mip_count) = mip_count {
+            let textures = dimensions.mips().take(mip_count)
+                .map(|d| inner(self, d))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Texture::try_from_mips(textures)?)
+        } else {
+            inner(self, dimensions)
+        }
+    }
+
+    pub fn read_faces<F>(&mut self, dimensions: Dimensions, faces: Option<Vec<CubeFace>>, mut inner: F) -> TextureResult
+        where F: FnMut(&mut Self, Dimensions) -> TextureResult
+    {
+        if let Some(faces) = faces {
+            let textures = faces.into_iter()
+                .map(|f| -> TextureResult<_> {
+                    Ok((f, inner(self, dimensions)?))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Texture::try_from_faces(textures)?)
+        } else {
+            inner(self, dimensions)
+        }
+    }
+
+    pub fn read_layers<F>(&mut self, dimensions: Dimensions, layer_count: Option<usize>, mut inner: F) -> TextureResult
+        where F: FnMut(&mut Self, Dimensions) -> TextureResult
+    {
+        if let Some(layer_count) = layer_count {
+            let textures = (0..layer_count)
+                .map(|_| inner(self, dimensions))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Texture::try_from_layers(textures)?)
+        } else {
+            inner(self, dimensions)
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Texture {
+    format: Format,
+    surfaces: TextureShapeNode<Surface>,
 }
 
 impl Dimensioned for Texture {

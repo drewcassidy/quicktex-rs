@@ -8,6 +8,7 @@ use std::io::{BufRead, Read, Seek};
 use binrw::prelude::*;
 use enumflags2::{BitFlags, bitflags};
 use image::io::Reader;
+use itertools::Itertools;
 use lazycell::LazyCell;
 use strum::VariantArray;
 use thiserror::Error;
@@ -18,8 +19,8 @@ use crate::container::dds::dx10_header::{Dimensionality, DX10Header};
 use crate::container::dds::pixel_format::{FourCC, PixelFormat};
 use crate::dimensions::Dimensions;
 use crate::format::Format;
-use crate::shape::{CubeFace, TextureShape};
-use crate::texture::Texture;
+use crate::shape::{CubeFace, ShapeError, TextureShape};
+use crate::texture::{Texture, TextureError, TextureReader};
 
 mod pixel_format;
 mod dx10_header;
@@ -32,11 +33,23 @@ pub enum DDSError {
     #[error("Invalid DDS Header: {0}")]
     HeaderError(String),
 
+    #[error("Invalid Texture Shape: {0}")]
+    ShapeError(#[from] ShapeError),
+
     #[error("Unsupported format: {0}")]
     UnsupportedFormat(String),
 
     #[error("IO Error with file contents")]
     IOError(#[from] std::io::Error),
+}
+
+impl From<TextureError> for DDSError {
+    fn from(value: TextureError) -> Self {
+        match value {
+            TextureError::IO(io) => { Self::IOError(io) }
+            TextureError::Shape(shape) => { Self::ShapeError(shape) }
+        }
+    }
 }
 
 type DDSResult<T = ()> = Result<T, DDSError>;
@@ -169,50 +182,64 @@ impl IntoContainerError for DDSError {
 }
 
 impl DDSHeader {
-    fn read_mips<R: Read>(&self, reader: &mut R) -> DDSResult<Texture> {
-        if let Some(mip_count) = self.mips()? {
-            let textures = self.dimensions()?.mips().take(mip_count)
-                .map(|d| -> DDSResult<_> {
-                    Texture::read_surface(reader, d, self.format()?).map_err(DDSError::from)
-                })
-                .collect::<DDSResult<Vec<_>>>()?;
-            Ok(Texture::try_from_mips(textures).expect("Shape error reading mip chain"))
-        } else {
-            Ok(Texture::read_surface(reader, self.dimensions()?, self.format()?)?)
-        }
-    }
-
-    fn read_faces<R: Read>(&self, reader: &mut R) -> DDSResult<Texture> {
-        if let Some(mut faces) = self.faces()? {
-            faces.sort_by_key(cubemap_order);
-            let textures = faces.into_iter()
-                .map(|f| -> DDSResult<_> {
-                    Ok((f, self.read_mips(reader)?))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(Texture::try_from_faces(textures).expect("Shape error reading mip chain"))
-        } else {
-            self.read_mips(reader)
-        }
-    }
-
-    fn read_all<R: Read>(&self, reader: &mut R) -> DDSResult<Texture> {
-        if let Some(layers) = self.layers()? {
-            let textures = (0..layers)
-                .map(|l| self.read_faces(reader))
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(Texture::try_from_layers(textures).expect("Shape error reading mip chain"))
-        } else {
-            self.read_faces(reader)
-        }
-    }
+    // fn read_mips<R: Read>(&self, mut reader: TextureReader<R>) -> DDSResult<Texture> {
+    //     if let Some(mip_count) = self.mips()? {
+    //         let textures = self.dimensions()?.mips().take(mip_count)
+    //             .map(|d| -> DDSResult<_> {
+    //                 reader.read_surface(d).map_err(DDSError::from)
+    //             })
+    //             .collect::<DDSResult<Vec<_>>>()?;
+    //         Ok(Texture::try_from_mips(textures).expect("Shape error reading mip chain"))
+    //     } else {
+    //         Ok(reader.read_surface(self.dimensions()?)?)
+    //     }
+    // }
+    //
+    // fn read_faces<R: Read>(&self, mut reader: TextureReader<R>) -> DDSResult<Texture> {
+    //     if let Some(mut faces) = self.faces()? {
+    //         faces.sort_by_key(cubemap_order);
+    //         let textures = faces.into_iter()
+    //             .map(|f| -> DDSResult<_> {
+    //                 Ok((f, self.read_mips(reader)?))
+    //             })
+    //             .collect::<Result<Vec<_>, _>>()?;
+    //         Ok(Texture::try_from_faces(textures).expect("Shape error reading mip chain"))
+    //     } else {
+    //         self.read_mips(reader)
+    //     }
+    // }
+    //
+    // fn read_all<R: Read>(&self, mut reader: TextureReader<R>) -> DDSResult<Texture> {
+    //     if let Some(layers) = self.layers()? {
+    //         let textures = (0..layers)
+    //             .map(|l| self.read_faces(reader))
+    //             .collect::<Result<Vec<_>, _>>()?;
+    //         Ok(Texture::try_from_layers(textures).expect("Shape error reading mip chain"))
+    //     } else {
+    //         self.read_faces(reader)
+    //     }
+    // }
 }
 
 impl ContainerHeader for DDSHeader {
     type Error = DDSError;
 
     fn read_with<R: Read + Seek>(&self, reader: &mut R) -> Result<Texture, Self::Error> {
-        self.read_all(reader)
+        let mut texture_reader = TextureReader { format: self.format()?, reader };
+        let layers = self.layers()?;
+        let faces = self.faces()?.map(|f| f.into_iter().sorted_by_key(cubemap_order).collect_vec());
+        let mips = self.mips()?;
+
+        // DDS files are ordered as Array(Cubemap(Mipmap(Surface)))
+        // yes this is confusing I couldn't figure out how to abstract it
+        let texture =
+            texture_reader.read_layers(self.dimensions()?, layers, |r: &mut TextureReader<R>, d| {
+                r.read_faces(d, faces.clone(), |r: &mut TextureReader<R>, d| {
+                    r.read_mips(d, mips, TextureReader::<R>::read_surface)
+                })
+            })?;
+
+        Ok(texture)
     }
 
     fn dimensions(&self) -> Result<Dimensions, DDSError> {

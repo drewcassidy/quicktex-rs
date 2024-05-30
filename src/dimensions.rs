@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::fmt::{Debug, format, Formatter, Write};
-use std::iter::zip;
-use std::num::NonZeroU32;
-use std::ops::Deref;
+use std::fmt::Formatter;
+use std::fmt::Debug;
+
 use itertools::Itertools;
 use thiserror::Error;
+
 use crate::util::AsSlice;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -60,14 +60,14 @@ impl Dimensions {
         }
     }
 
-    pub fn blocks(self, bdimensions: Dimensions) -> Dimensions {
+    pub fn blocks(self, block: Dimensions) -> Dimensions {
         let rounding_divide = |(size, bsize)| -> u32 {
             (size + (bsize - 1)) / bsize
         };
 
         let result_vec = self.into_iter()
-            .zip_longest(bdimensions.into_iter())
-            .map(|b| rounding_divide(b.or_else(|| 1, || 1)))
+            .zip_longest(block.into_iter())
+            .map(|b| rounding_divide(b.or_else(|| &1u32, || &1u32)))
             .collect_vec();
 
         result_vec.try_into().expect("Dimensions somehow changed size")
@@ -84,18 +84,6 @@ impl Debug for Dimensions {
     }
 }
 
-impl IntoIterator for Dimensions
-    where
-        Self: Into<Vec<u32>>,
-{
-    type Item = u32;
-    type IntoIter = <Vec<u32> as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        Into::<Vec<u32>>::into(self).into_iter()
-    }
-}
-
 impl AsRef<[u32]> for Dimensions {
     fn as_ref(&self) -> &[u32] {
         match self {
@@ -103,6 +91,15 @@ impl AsRef<[u32]> for Dimensions {
             Dimensions::_2D(v) => { &v[..] }
             Dimensions::_3D(v) => { &v[..] }
         }
+    }
+}
+
+impl<'a> IntoIterator for &'a Dimensions where Self: 'a {
+    type Item = &'a u32;
+    type IntoIter = std::slice::Iter<'a, u32>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_ref().into_iter()
     }
 }
 

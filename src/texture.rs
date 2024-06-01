@@ -56,7 +56,9 @@ impl<'a, R: Read> TextureReader<'a, R> {
         let size = self.format.size_for(dimensions);
         let mut buffer: Vec<u8> = vec![0; size];
         self.reader.read_exact(&mut buffer[..])?; // read into the vec buffer
-        let buffer = Rc::<[u8]>::from(buffer); // move buffer contents into an RC without copying
+        let buffer = Rc::<[u8]>::from(buffer); // move buffer contents into an RC WITH A COPY
+
+        // doing this without a copy without `new_uninit` appears to be impossible
 
         let surfaces = TextureShapeNode::Surface(Surface { dimensions, buffer });
 

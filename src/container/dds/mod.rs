@@ -179,46 +179,6 @@ impl IntoContainerError for DDSError {
     }
 }
 
-impl DDSHeader {
-    // fn read_mips<R: Read>(&self, mut reader: TextureReader<R>) -> DDSResult<Texture> {
-    //     if let Some(mip_count) = self.mips()? {
-    //         let textures = self.dimensions()?.mips().take(mip_count)
-    //             .map(|d| -> DDSResult<_> {
-    //                 reader.read_surface(d).map_err(DDSError::from)
-    //             })
-    //             .collect::<DDSResult<Vec<_>>>()?;
-    //         Ok(Texture::try_from_mips(textures).expect("Shape error reading mip chain"))
-    //     } else {
-    //         Ok(reader.read_surface(self.dimensions()?)?)
-    //     }
-    // }
-    //
-    // fn read_faces<R: Read>(&self, mut reader: TextureReader<R>) -> DDSResult<Texture> {
-    //     if let Some(mut faces) = self.faces()? {
-    //         faces.sort_by_key(cubemap_order);
-    //         let textures = faces.into_iter()
-    //             .map(|f| -> DDSResult<_> {
-    //                 Ok((f, self.read_mips(reader)?))
-    //             })
-    //             .collect::<Result<Vec<_>, _>>()?;
-    //         Ok(Texture::try_from_faces(textures).expect("Shape error reading mip chain"))
-    //     } else {
-    //         self.read_mips(reader)
-    //     }
-    // }
-    //
-    // fn read_all<R: Read>(&self, mut reader: TextureReader<R>) -> DDSResult<Texture> {
-    //     if let Some(layers) = self.layers()? {
-    //         let textures = (0..layers)
-    //             .map(|l| self.read_faces(reader))
-    //             .collect::<Result<Vec<_>, _>>()?;
-    //         Ok(Texture::try_from_layers(textures).expect("Shape error reading mip chain"))
-    //     } else {
-    //         self.read_faces(reader)
-    //     }
-    // }
-}
-
 impl ContainerHeader for DDSHeader {
     type Error = DDSError;
 

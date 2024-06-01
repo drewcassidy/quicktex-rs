@@ -3,12 +3,14 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use std::fmt::Debug;
-use std::io::{BufRead, Read, Seek};
-use crate::texture::{Texture};
+use std::io::{Read, Seek};
+
 use thiserror::Error;
+
 use crate::dimensions::Dimensions;
 use crate::format::Format;
 use crate::shape::CubeFace;
+use crate::texture::Texture;
 
 pub mod dds;
 

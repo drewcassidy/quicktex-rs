@@ -3,23 +3,21 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use std::fmt::Debug;
-use std::io::{BufRead, Read, Seek};
+use std::io::{Read, Seek};
 
 use binrw::prelude::*;
 use enumflags2::{BitFlags, bitflags};
-use image::io::Reader;
 use itertools::Itertools;
-use lazycell::LazyCell;
 use strum::VariantArray;
 use thiserror::Error;
 
 use crate::container::{ContainerError, ContainerHeader, IntoContainerError};
-use crate::container::dds::DDSError::{HeaderError, ParseError};
+use crate::container::dds::DDSError::HeaderError;
 use crate::container::dds::dx10_header::{Dimensionality, DX10Header};
-use crate::container::dds::pixel_format::{FourCC, PixelFormat};
+use crate::container::dds::pixel_format::PixelFormat;
 use crate::dimensions::Dimensions;
 use crate::format::Format;
-use crate::shape::{CubeFace, ShapeError, TextureShape};
+use crate::shape::{CubeFace, ShapeError};
 use crate::texture::{Texture, TextureError, TextureReader};
 
 mod pixel_format;
@@ -171,7 +169,7 @@ pub struct DDSHeader {
     pub pixel_format: PixelFormat,
     #[brw(pad_after = 4)]
     pub caps: Caps,
-    #[br(if (pixel_format.four_cc == FourCC(* b"DX10")))]
+    #[br(if (pixel_format.is_dx10()))]
     pub dx10header: Option<DX10Header>,
 }
 
@@ -298,7 +296,6 @@ impl ContainerHeader for DDSHeader {
 
     fn format(&self) -> DDSResult<Format> {
         use DDSError::UnsupportedFormat;
-        use crate::container::dds::pixel_format::FourCC;
 
         if let Some(format) = self.pixel_format.as_format()? {
             Ok(format)
@@ -306,7 +303,7 @@ impl ContainerHeader for DDSHeader {
             // DirectX 10 header format with DXGI
 
             // fourCC must be "DX10"
-            assert!(self.pixel_format.four_cc.eq(&FourCC(*b"DX10")),
+            assert!(self.pixel_format.is_dx10(),
                     "No format found in PixelFormat yet FourCC is not 'DX10'");
 
             let dx10_header = self.dx10header

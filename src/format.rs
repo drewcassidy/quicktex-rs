@@ -11,13 +11,13 @@ pub enum AlphaFormat {
     /// Any alpha channel content is being used as a 4th channel
     /// and is not intended to represent transparency (straight or premultiplied).
     /// This is the default for unknown alpha channel types.
-    Custom { bitmask: u32 },
+    Custom { alpha_mask: u32 },
 
     /// Any alpha channel content is presumed to use straight alpha.
-    Straight { bitmask: u32 },
+    Straight { alpha_mask: u32 },
 
     /// Any alpha channel content is using premultiplied alpha.
-    Premultiplied { bitmask: u32 },
+    Premultiplied { alpha_mask: u32 },
 
     /// Any alpha channel content is all set to fully opaque.
     Opaque,
@@ -27,23 +27,28 @@ pub enum AlphaFormat {
 pub enum ColorFormat {
     /// RGB color channels
     RGB {
-        bitmasks: [u32; 3],
+        r_mask: u32,
+        g_mask: u32,
+        b_mask: u32,
         srgb: bool,
     },
 
     /// YUV color channels
     YUV {
-        bitmasks: [u32; 3],
+        y_mask: u32,
+        u_mask: u32,
+        v_mask: u32,
     },
 
     /// Luminance-only color channels
     L {
-        bitmask: u32,
+        l_mask: u32,
     },
 
     /// No color information, e.g. alpha only
     None,
 }
+
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Format {

@@ -7,7 +7,7 @@ use enumflags2::{BitFlags, bitflags};
 use crate::container::dds::{DDSError, DDSResult};
 use crate::format::{AlphaFormat, ColorFormat, Format};
 
-/// Bit flags for identifying various information in a [`crate::container::dds::pixel_format::PixelFormatIntermediate`] object. Not exposed to the API.
+/// Bit flags for identifying various information in a [`PixelFormatIntermediate`] object. Not exposed to the API.
 #[bitflags]
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,8 +66,8 @@ impl From<AlphaFormat> for DDSAlphaFormat {
 }
 
 /// A four byte format code. Usually an ASCII-like string but sometimes a u32.
-/// For maximum compatibility it's just stored as a byte string, but printed as text in `Debug` if 
-/// it's valid UTF-8 
+/// For maximum compatibility it's just stored as a byte string, but printed as text in `Debug` if
+/// it's valid UTF-8
 #[binrw]
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub struct FourCC(pub [u8; 4]);
@@ -193,38 +193,46 @@ impl From<PixelFormat> for PixelFormatIntermediate {
     }
 }
 
+impl TryInto<Format> for PixelFormat {
+    type Error = DDSError;
 
-impl PixelFormat {
-    /// Convert this PixelFormat to a Format. Returns None if the four_cc is "DX10", meaning the
-    /// actual format is stored elsewhere in the DDS header
-    pub fn as_format(&self) -> DDSResult<Option<Format>> {
+    fn try_into(self) -> Result<Format, Self::Error> {
         use crate::format::Format::*;
         match self {
             PixelFormat::FourCC(four_cc) => {
                 match &four_cc.0 {
-                    b"DX10" => { Ok(None) } // DX10 header must be stored elsewhere
-                    b"DXT1" => Ok(Some(BC1 { srgb: false })), // DXT1, AKA BC1
-                    b"DXT3" => Ok(Some(BC2 { srgb: false })), // DXT3, AKA BC2
-                    b"DXT5" => Ok(Some(BC3 { srgb: false })), // DXT5, AKA BC3
-                    b"BC4U" => Ok(Some(BC4 { signed: false })), // BC4 Unsigned
-                    b"BC4S" => Ok(Some(BC4 { signed: true })), // BC4 Signed
-                    b"ATI2" => Ok(Some(BC5 { signed: false })), // BC5 Unsigned
-                    b"BC5S" => Ok(Some(BC5 { signed: true })), // BC5 Signed
+                    b"DX10" => {
+                        Err(DDSError::UnsupportedFormat(
+                            "Cannot convert DX10 PixelFormat".to_string()))
+                    } // DX10 header must be stored elsewhere
+                    b"DXT1" => Ok(BC1 { srgb: false }), // DXT1, AKA BC1
+                    b"DXT3" => Ok(BC2 { srgb: false }), // DXT3, AKA BC2
+                    b"DXT5" => Ok(BC3 { srgb: false }), // DXT5, AKA BC3
+                    b"BC4U" => Ok(BC4 { signed: false }), // BC4 Unsigned
+                    b"BC4S" => Ok(BC4 { signed: true }), // BC4 Signed
+                    b"ATI2" => Ok(BC5 { signed: false }), // BC5 Unsigned
+                    b"BC5S" => Ok(BC5 { signed: true }), // BC5 Signed
                     four_cc => Err(DDSError::UnsupportedFormat(
                         format!("Unknown FourCC code: '{four_cc:?}'", )
                     )),
                 }
             }
             PixelFormat::Uncompressed { bit_count, alpha_format, color_format } => {
-                Ok(Some(Uncompressed {
-                    pitch: (*bit_count / 8) as usize,
-                    alpha_format: (*alpha_format).into(),
-                    color_format: *color_format,
-                }))
+                if bit_count % 8 != 0 {
+                    return Err(DDSError::UnsupportedFormat(format!("BitCount {bit_count} is not divisible by 8")));
+                }
+
+                Ok(Uncompressed {
+                    pitch: (bit_count / 8) as usize,
+                    alpha_format: alpha_format.into(),
+                    color_format,
+                })
             }
         }
     }
+}
 
+impl PixelFormat {
     pub fn is_dx10(&self) -> bool {
         match self {
             PixelFormat::FourCC(FourCC(four_cc)) if four_cc == b"DX10" => { true }

@@ -1,6 +1,6 @@
 use binrw::{BinRead, BinWrite};
 use super::DDSError::UnsupportedFormat;
-use super::DDSResult;
+use super::{DDSError, DDSResult};
 use crate::format::Format;
 
 #[derive(BinRead, BinWrite)]
@@ -128,8 +128,10 @@ pub enum DXGIFormat {
     V408 = 132,
 }
 
-impl DXGIFormat {
-    pub fn as_format(&self) -> DDSResult<Format> {
+impl TryInto<Format> for DXGIFormat {
+    type Error = DDSError;
+
+    fn try_into(self) -> Result<Format, Self::Error> {
         // todo!("DX10 header formats are not currently supported");
         Err(UnsupportedFormat("DX10 header formats are not currently supported".into()))
     }
@@ -139,7 +141,7 @@ impl DXGIFormat {
 #[derive(BinRead, BinWrite)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[brw(little, repr = u32)]
-pub enum Dimensionality {
+pub(crate) enum Dimensionality {
     Texture1D = 2,
     Texture2D = 3,
     Texture3D = 4,
@@ -148,7 +150,7 @@ pub enum Dimensionality {
 #[derive(BinRead, BinWrite)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[brw(little, repr = u32)]
-pub enum AlphaMode {
+pub(crate) enum AlphaMode {
     Unknown = 0,
     Straight = 1,
     Premultiplied = 2,
@@ -158,7 +160,7 @@ pub enum AlphaMode {
 
 #[derive(BinRead, BinWrite)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct DX10Header {
+pub(crate) struct DX10HeaderIntermediate {
     pub dxgi_format: DXGIFormat,
     pub dimensionality: Dimensionality,
     #[br(map = | b: u32 | b == 0x4)]

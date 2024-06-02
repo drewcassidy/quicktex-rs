@@ -12,8 +12,7 @@ use strum::VariantArray;
 use thiserror::Error;
 
 use crate::container::{ContainerError, ContainerHeader, IntoContainerError};
-use crate::container::dds::DDSError::HeaderError;
-use crate::container::dds::dx10_header::{Dimensionality, DX10Header};
+use crate::container::dds::dx10_header::{Dimensionality, DX10HeaderIntermediate, DXGIFormat};
 use crate::container::dds::pixel_format::PixelFormat;
 use crate::dimensions::Dimensions;
 use crate::format::Format;
@@ -41,6 +40,12 @@ pub enum DDSError {
     IOError(#[from] std::io::Error),
 }
 
+impl IntoContainerError for DDSError {
+    fn into(self, op: &'static str) -> ContainerError {
+        ContainerError::DDSError(self, op)
+    }
+}
+
 impl From<TextureError> for DDSError {
     fn from(value: TextureError) -> Self {
         match value {
@@ -51,17 +56,6 @@ impl From<TextureError> for DDSError {
 }
 
 type DDSResult<T = ()> = Result<T, DDSError>;
-
-fn cubemap_order(face: &CubeFace) -> u32 {
-    match face {
-        CubeFace::PositiveX => { 0 }
-        CubeFace::NegativeX => { 1 }
-        CubeFace::PositiveY => { 2 }
-        CubeFace::NegativeY => { 3 }
-        CubeFace::PositiveZ => { 4 }
-        CubeFace::NegativeZ => { 5 }
-    }
-}
 
 
 pub fn read_texture(reader: &mut (impl Read + Seek)) -> DDSResult<Texture> {
@@ -74,7 +68,7 @@ pub fn read_texture(reader: &mut (impl Read + Seek)) -> DDSResult<Texture> {
 #[bitflags]
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DDSFlags {
+enum DDSFlags {
     Caps = 0x1,
     Height = 0x2,
     Width = 0x4,
@@ -88,7 +82,7 @@ pub enum DDSFlags {
 #[bitflags]
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Caps1 {
+enum Caps1 {
     Complex = 0x8,
     Mipmap = 0x400000,
     Texture = 0x1000,
@@ -97,7 +91,7 @@ pub enum Caps1 {
 #[bitflags]
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Caps2 {
+enum Caps2 {
     Cubemap = 0x200,
     CubemapPositiveX = 0x400,
     CubemapNegativeX = 0x800,
@@ -108,54 +102,38 @@ pub enum Caps2 {
     Volume = 0x200000,
 }
 
+static CAPS_CUBEMAP_MAP: [(Caps2, CubeFace); 6] = [
+    (Caps2::CubemapPositiveX, CubeFace::PositiveX),
+    (Caps2::CubemapNegativeX, CubeFace::NegativeX),
+    (Caps2::CubemapPositiveY, CubeFace::PositiveY),
+    (Caps2::CubemapNegativeY, CubeFace::NegativeY),
+    (Caps2::CubemapPositiveZ, CubeFace::PositiveZ),
+    (Caps2::CubemapNegativeZ, CubeFace::NegativeZ),
+];
+
 
 impl Caps2 {
     fn to_cubemap_face(self) -> Option<CubeFace> {
-        use Caps2::*;
-        match self {
-            CubemapPositiveX => Some(CubeFace::PositiveX),
-            CubemapNegativeX => Some(CubeFace::NegativeX),
-            CubemapPositiveY => Some(CubeFace::PositiveY),
-            CubemapNegativeY => Some(CubeFace::NegativeY),
-            CubemapPositiveZ => Some(CubeFace::PositiveZ),
-            CubemapNegativeZ => Some(CubeFace::NegativeZ),
-            _ => None
-        }
+        CAPS_CUBEMAP_MAP.iter().find_map(
+            |(cap, face)| (*cap == self).then_some(*face)
+        )
     }
 
     fn from_cubemap_face(face: CubeFace) -> Self {
-        use Caps2::*;
-        match face {
-            CubeFace::PositiveX => CubemapPositiveX,
-            CubeFace::NegativeX => CubemapNegativeX,
-            CubeFace::PositiveY => CubemapPositiveY,
-            CubeFace::NegativeY => CubemapNegativeY,
-            CubeFace::PositiveZ => CubemapPositiveZ,
-            CubeFace::NegativeZ => CubemapNegativeZ
-        }
+        CAPS_CUBEMAP_MAP.iter().find_map(
+            |(cap, rface)| (*rface == face).then_some(*cap)
+        ).expect("Invalid cubemap face")
     }
 }
 
-/// Named tuple containing all "Caps" bitflags
-#[derive(BinRead, BinWrite)]
-#[derive(Debug, Copy, Clone)]
-#[brw(little)]
-pub struct Caps(
-    #[br(try_map = BitFlags::from_bits)]
-    #[bw(map = | bf | bf.bits())]
-    BitFlags<Caps1>,
-    #[br(try_map = BitFlags::from_bits)]
-    #[bw(map = | bf | bf.bits())]
-    BitFlags<Caps2>,
-    u32,
-    u32,
-);
-
+fn cubemap_order(face: &CubeFace) -> usize {
+    CAPS_CUBEMAP_MAP.iter().position(|(_, rface)| *rface == *face).expect("Invalid cubemap face")
+}
 
 #[binrw]
 #[derive(Debug, Copy, Clone)]
 #[brw(little, magic = b"DDS ")]
-pub struct DDSHeader {
+struct DDSHeaderIntermediate {
     #[brw(magic = 124u32)] // Size constant
     #[br(try_map = BitFlags::from_bits)]
     #[bw(map = | bf | bf.bits())]
@@ -167,15 +145,77 @@ pub struct DDSHeader {
     pub mipmap_count: u32,
     #[brw(pad_before = 44)]
     pub pixel_format: PixelFormat,
+    #[br(try_map = BitFlags::from_bits)]
+    #[bw(map = | bf | bf.bits())]
+    pub caps1: BitFlags<Caps1>,
+    #[br(try_map = BitFlags::from_bits)]
+    #[bw(map = | bf | bf.bits())]
     #[brw(pad_after = 4)]
-    pub caps: Caps,
+    pub caps2: BitFlags<Caps2>,
+    pub caps3: u32,
+    pub caps4: u32,
     #[br(if (pixel_format.is_dx10()))]
-    pub dx10header: Option<DX10Header>,
+    pub dx10header: Option<DX10HeaderIntermediate>,
 }
 
-impl IntoContainerError for DDSError {
-    fn into(self, op: &'static str) -> ContainerError {
-        ContainerError::DDSError(self, op)
+
+// #[bw(map = | h: & DDSHeader | DDSHeaderIntermediate::from( * h))]
+#[derive(Debug, Clone, BinRead)]
+#[br(map = DDSHeaderIntermediate::into)]
+pub enum DDSHeader {
+    Legacy {
+        dimensions: Dimensions,
+        mips: Option<u32>,
+        faces: Option<Vec<CubeFace>>,
+        format: PixelFormat,
+    },
+    DX10 {
+        dimensions: Dimensions,
+        mips: Option<u32>,
+        layers: Option<u32>,
+        is_cubemap: bool,
+        dxgi_format: DXGIFormat,
+    },
+}
+
+impl From<DDSHeaderIntermediate> for DDSHeader {
+    fn from(value: DDSHeaderIntermediate) -> Self {
+        let mips = value.flags.contains(DDSFlags::MipmapCount).then_some(value.mipmap_count);
+        if let Some(dx10header) = value.dx10header {
+            let dimensions = match dx10header.dimensionality {
+                Dimensionality::Texture1D => Dimensions::_1D(value.width),
+                Dimensionality::Texture2D => Dimensions::_2D([value.width, value.height]),
+                Dimensionality::Texture3D => Dimensions::_3D([value.width, value.height, value.depth])
+            };
+            let layers = match dx10header.array_size {
+                0 | 1 => None,
+                l => Some(l)
+            };
+
+            DDSHeader::DX10 {
+                dimensions,
+                mips,
+                layers,
+                is_cubemap: dx10header.cube,
+                dxgi_format: dx10header.dxgi_format,
+            }
+        } else {
+            let dimensions = if value.flags.contains(DDSFlags::Depth) {
+                Dimensions::_3D([value.width, value.height, value.depth])
+            } else {
+                Dimensions::_2D([value.width, value.height])
+            };
+            let faces = value.caps2.contains(Caps2::Cubemap).then_some(
+                value.caps2.iter().filter_map(Caps2::to_cubemap_face).collect_vec()
+            );
+
+            DDSHeader::Legacy {
+                dimensions,
+                mips,
+                faces,
+                format: value.pixel_format,
+            }
+        }
     }
 }
 
@@ -201,75 +241,40 @@ impl ContainerHeader for DDSHeader {
     }
 
     fn dimensions(&self) -> Result<Dimensions, DDSError> {
-        Ok(match self.dx10header.clone() {
-            None =>
-                if self.flags.contains(DDSFlags::Depth) {
-                    Dimensions::_3D([self.width, self.height, self.depth])
-                } else {
-                    Dimensions::_2D([self.width, self.height])
-                }
-
-            Some(dx10header) =>
-                match dx10header.dimensionality {
-                    Dimensionality::Texture1D => Dimensions::_1D(self.width),
-
-                    Dimensionality::Texture2D => Dimensions::_2D([self.width, self.height]),
-
-                    Dimensionality::Texture3D => Dimensions::_3D([self.width, self.height, self.depth])
-                }
+        Ok(match self {
+            DDSHeader::Legacy { dimensions, .. } |
+            DDSHeader::DX10 { dimensions, .. } => { *dimensions }
         })
     }
 
     fn layers(&self) -> Result<Option<usize>, DDSError> {
-        Ok(match self.dx10header.map(|d| d.array_size) {
-            None | Some(1 | 0) => None,
-            Some(layers) => Some(layers as usize)
+        Ok(match self {
+            DDSHeader::DX10 { layers: Some(layers), .. } => { Some(*layers as usize) }
+            _ => { None }
         })
     }
 
     fn faces(&self) -> DDSResult<Option<Vec<CubeFace>>> {
-        Ok(match self.dx10header.clone() {
-            None => {
-                // if there's no DX10 header, we read from the caps flags
-                let caps2 = self.caps.1;
-                if caps2.contains(Caps2::Cubemap) {
-                    Some(caps2.iter().filter_map(Caps2::to_cubemap_face).collect())
-                } else { None }
-            }
-            Some(dx10header) => {
-                // if there is a DX10 header, we check the cube flag.
-                // DX10 DDS files do not support partial cubemaps
-                if dx10header.cube {
-                    Some(CubeFace::VARIANTS.into())
-                } else { None }
+        Ok(match self {
+            DDSHeader::Legacy { faces, .. } => { faces.clone() }
+            DDSHeader::DX10 { is_cubemap, .. } => {
+                is_cubemap.then_some(CubeFace::VARIANTS.into())
             }
         })
     }
 
     fn mips(&self) -> DDSResult<Option<usize>> {
-        match (self.flags.contains(DDSFlags::MipmapCount), self.mipmap_count) {
-            (false, _) => Ok(None),
-            (true, 0) => Err(HeaderError("MipmapCount flag is present, but MipmapCount is 0".into())),
-            (true, mips) => Ok(Some(mips as usize))
-        }
+        Ok(match self {
+            DDSHeader::Legacy { mips: Some(mips), .. } |
+            DDSHeader::DX10 { mips: Some(mips), .. } => Some(*mips as usize),
+            _ => None
+        })
     }
 
     fn format(&self) -> DDSResult<Format> {
-        use DDSError::UnsupportedFormat;
-
-        if let Some(format) = self.pixel_format.as_format()? {
-            Ok(format)
-        } else {
-            // DirectX 10 header format with DXGI
-
-            // fourCC must be "DX10"
-            assert!(self.pixel_format.is_dx10(),
-                    "No format found in PixelFormat yet FourCC is not 'DX10'");
-
-            let dx10_header = self.dx10header
-                .ok_or(UnsupportedFormat("FourCC is 'DX10' but no DX10 header found".into()))?;
-
-            dx10_header.dxgi_format.as_format()
+        match *self {
+            DDSHeader::Legacy { format, .. } => { format.try_into() }
+            DDSHeader::DX10 { dxgi_format, .. } => { dxgi_format.try_into() }
         }
     }
 }

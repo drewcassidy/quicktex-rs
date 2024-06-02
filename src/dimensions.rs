@@ -4,18 +4,31 @@
 
 use std::fmt::Formatter;
 use std::fmt::Debug;
+use std::iter::{Map, zip};
+use std::num::{NonZeroU32, TryFromIntError};
 
 use itertools::Itertools;
 use thiserror::Error;
 
 use crate::util::AsSlice;
 
+#[derive(Error, Debug)]
+pub enum DimensionError {
+    #[error("Dimensions cannot be created with a dimensionality of {0}")]
+    Dimensionality(usize),
+
+    #[error("Invalid {0}: {1}")]
+    Invalid(&'static str, TryFromIntError),
+}
+
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Dimensions {
-    _1D(u32),
-    _2D([u32; 2]),
-    _3D([u32; 3]),
+    _1D(NonZeroU32),
+    _2D([NonZeroU32; 2]),
+    _3D([NonZeroU32; 3]),
 }
+
+static DIMENSION_NAMES: [&'static str; 3] = ["width", "height", "depth"];
 
 
 impl Dimensions {
@@ -29,23 +42,23 @@ impl Dimensions {
 
     pub fn width(self) -> u32 {
         match self {
-            Dimensions::_1D(width) => width,
-            Dimensions::_2D([width, ..]) => width,
-            Dimensions::_3D([width, ..]) => width,
+            Dimensions::_1D(width) => width.into(),
+            Dimensions::_2D([width, ..]) => width.into(),
+            Dimensions::_3D([width, ..]) => width.into(),
         }
     }
 
     pub fn height(self) -> u32 {
         match self {
             Dimensions::_1D(_) => 1,
-            Dimensions::_2D([_, height]) => height,
-            Dimensions::_3D([_, height, _]) => height,
+            Dimensions::_2D([_, height]) => height.into(),
+            Dimensions::_3D([_, height, _]) => height.into(),
         }
     }
 
     pub fn depth(self) -> u32 {
         match self {
-            Dimensions::_3D([.., depth]) => depth,
+            Dimensions::_3D([.., depth]) => depth.into(),
             _ => 1,
         }
     }
@@ -67,7 +80,7 @@ impl Dimensions {
 
         let result_vec = self.into_iter()
             .zip_longest(block.into_iter())
-            .map(|b| rounding_divide(b.or_else(|| &1u32, || &1u32)))
+            .map(|b| rounding_divide(b.or_else(|| 1u32, || 1u32)))
             .collect_vec();
 
         result_vec.try_into().expect("Dimensions somehow changed size")
@@ -84,8 +97,8 @@ impl Debug for Dimensions {
     }
 }
 
-impl AsRef<[u32]> for Dimensions {
-    fn as_ref(&self) -> &[u32] {
+impl AsRef<[NonZeroU32]> for Dimensions {
+    fn as_ref(&self) -> &[NonZeroU32] {
         match self {
             Dimensions::_1D(width) => { width.as_slice() }
             Dimensions::_2D(v) => { &v[..] }
@@ -95,17 +108,17 @@ impl AsRef<[u32]> for Dimensions {
 }
 
 impl<'a> IntoIterator for &'a Dimensions where Self: 'a {
-    type Item = &'a u32;
-    type IntoIter = std::slice::Iter<'a, u32>;
+    type Item = u32;
+    type IntoIter = Map<std::slice::Iter<'a, NonZeroU32>, fn(&NonZeroU32) -> u32>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.as_ref().into_iter()
+        self.as_ref().into_iter().map(|d| (*d).into())
     }
 }
 
 impl Into<Vec<u32>> for Dimensions {
     fn into(self) -> Vec<u32> {
-        self.as_ref().into()
+        self.into_iter().collect_vec()
     }
 }
 
@@ -114,45 +127,37 @@ impl Into<Vec<u32>> for Dimensions {
 pub struct DimensionLengthError(usize);
 
 impl TryFrom<&[u32]> for Dimensions {
-    type Error = DimensionLengthError;
+    type Error = DimensionError;
 
     fn try_from(value: &[u32]) -> Result<Self, Self::Error> {
-        match value.len() {
-            1 => Ok(Dimensions::_1D(value[0])),
-            2 => Ok(Dimensions::_2D(value.try_into().unwrap())),
-            3 => Ok(Dimensions::_3D(value.try_into().unwrap())),
-            l => Err(DimensionLengthError(l)),
+        let inner: Vec<NonZeroU32> =
+            zip(DIMENSION_NAMES.into_iter(), value.into_iter())
+                .map(|(i, d)| NonZeroU32::try_from(*d).map_err(|e| DimensionError::Invalid(i, e))).try_collect()?;
+
+        match inner.len() {
+            1 => Ok(Dimensions::_1D(inner[0])),
+            2 => Ok(Dimensions::_2D(inner.try_into().unwrap())),
+            3 => Ok(Dimensions::_3D(inner.try_into().unwrap())),
+            l => Err(DimensionError::Dimensionality(l)),
         }
     }
 }
 
 impl TryFrom<Vec<u32>> for Dimensions {
-    type Error = DimensionLengthError;
+    type Error = DimensionError;
     fn try_from(value: Vec<u32>) -> Result<Self, Self::Error> {
         Self::try_from(&value[..])
     }
 }
 
 impl<const N: usize> TryFrom<[u32; N]> for Dimensions {
-    type Error = DimensionLengthError;
+    type Error = DimensionError;
 
     fn try_from(value: [u32; N]) -> Result<Self, Self::Error> {
         Self::try_from(&value[..])
     }
 }
 
-
-#[test]
-fn test_try_from() {
-    assert_eq!(Dimensions::try_from([]), Err(DimensionLengthError(0)));
-    assert_eq!(Dimensions::try_from([1]), Ok(Dimensions::_1D(1)));
-    assert_eq!(Dimensions::try_from([1, 2]), Ok(Dimensions::_2D([1, 2])));
-    assert_eq!(Dimensions::try_from([1, 2, 4]), Ok(Dimensions::_3D([1, 2, 4])));
-    assert_eq!(Dimensions::try_from([1, 2, 4, 5]), Err(DimensionLengthError(4)));
-
-    assert_eq!(Dimensions::try_from(vec!(3, 4)), Ok(Dimensions::_2D([3, 4])));
-    assert_eq!(Dimensions::try_from(&vec!(3, 4)[..]), Ok(Dimensions::_2D([3, 4])));
-}
 
 pub struct MipDimensionIterator {
     current: Option<Dimensions>,

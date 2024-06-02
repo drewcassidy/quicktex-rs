@@ -10,6 +10,7 @@ use itertools::Itertools;
 use thiserror::Error;
 
 use crate::dimensions::{Dimensioned, Dimensions};
+use crate::error::TextureResult;
 use crate::format::Format;
 use crate::shape::{CubeFace, ShapeError, TextureIndex, TextureShape, TextureShapeNode};
 
@@ -37,17 +38,6 @@ pub struct TextureReader<'a, R: Read> {
     pub format: Format,
     pub reader: &'a mut R,
 }
-
-#[derive(Error, Debug)]
-pub enum TextureError {
-    #[error("IO Error: {0}")]
-    IO(#[from] std::io::Error),
-
-    #[error("Shape Error: {0}")]
-    Shape(#[from] ShapeError),
-}
-
-type TextureResult<T = Texture> = Result<T, TextureError>;
 
 impl<'a, R: Read> TextureReader<'a, R> {
     /// Read a single surface from a binary reader using the given dimensions

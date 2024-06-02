@@ -74,10 +74,10 @@ impl Format {
         use Format::*;
         match self {
             BC1 { .. } | BC4 { .. } => {
-                8 * dimensions.blocks(Dimensions::_2D([4, 4])).product() as usize
+                8 * dimensions.blocks(Dimensions::try_from([4, 4]).unwrap()).product() as usize
             }
             BC2 { .. } | BC3 { .. } | BC5 { .. } => {
-                16 * dimensions.blocks(Dimensions::_2D([4, 4])).product() as usize
+                16 * dimensions.blocks(Dimensions::try_from([4, 4]).unwrap()).product() as usize
             }
             Uncompressed { pitch, .. } => {
                 *pitch * dimensions.product() as usize

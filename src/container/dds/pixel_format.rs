@@ -3,8 +3,8 @@ use std::fmt::{Debug, Formatter};
 
 use binrw::prelude::*;
 use enumflags2::{BitFlags, bitflags};
+use crate::error::TextureError;
 
-use crate::container::dds::{DDSError, DDSResult};
 use crate::format::{AlphaFormat, ColorFormat, Format};
 
 /// Bit flags for identifying various information in a [`PixelFormatIntermediate`] object. Not exposed to the API.
@@ -194,7 +194,7 @@ impl From<PixelFormat> for PixelFormatIntermediate {
 }
 
 impl TryInto<Format> for PixelFormat {
-    type Error = DDSError;
+    type Error = TextureError;
 
     fn try_into(self) -> Result<Format, Self::Error> {
         use crate::format::Format::*;
@@ -202,7 +202,7 @@ impl TryInto<Format> for PixelFormat {
             PixelFormat::FourCC(four_cc) => {
                 match &four_cc.0 {
                     b"DX10" => {
-                        Err(DDSError::UnsupportedFormat(
+                        Err(TextureError::Format(
                             "Cannot convert DX10 PixelFormat".to_string()))
                     } // DX10 header must be stored elsewhere
                     b"DXT1" => Ok(BC1 { srgb: false }), // DXT1, AKA BC1
@@ -212,14 +212,14 @@ impl TryInto<Format> for PixelFormat {
                     b"BC4S" => Ok(BC4 { signed: true }), // BC4 Signed
                     b"ATI2" => Ok(BC5 { signed: false }), // BC5 Unsigned
                     b"BC5S" => Ok(BC5 { signed: true }), // BC5 Signed
-                    four_cc => Err(DDSError::UnsupportedFormat(
+                    four_cc => Err(TextureError::Format(
                         format!("Unknown FourCC code: '{four_cc:?}'", )
                     )),
                 }
             }
             PixelFormat::Uncompressed { bit_count, alpha_format, color_format } => {
                 if bit_count % 8 != 0 {
-                    return Err(DDSError::UnsupportedFormat(format!("BitCount {bit_count} is not divisible by 8")));
+                    return Err(TextureError::Format(format!("BitCount {bit_count} is not divisible by 8")));
                 }
 
                 Ok(Uncompressed {

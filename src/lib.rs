@@ -12,3 +12,5 @@ pub mod texture;
 pub mod shape;
 mod util;
 mod blocktexture;
+pub mod error;
+

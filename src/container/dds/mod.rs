@@ -9,56 +9,21 @@ use binrw::prelude::*;
 use enumflags2::{BitFlags, bitflags};
 use itertools::Itertools;
 use strum::VariantArray;
-use thiserror::Error;
 
-use crate::container::{ContainerError, ContainerHeader, IntoContainerError};
-use crate::container::dds::dx10_header::{Dimensionality, DX10HeaderIntermediate, DXGIFormat};
-use crate::container::dds::pixel_format::PixelFormat;
+use crate::container::ContainerHeader;
+use dx10_header::{Dimensionality, DX10HeaderIntermediate, DXGIFormat};
+use pixel_format::PixelFormat;
 use crate::dimensions::Dimensions;
+use crate::error::{TextureError, TextureResult};
 use crate::format::Format;
-use crate::shape::{CubeFace, ShapeError};
-use crate::texture::{Texture, TextureError, TextureReader};
+use crate::shape::CubeFace;
+use crate::texture::TextureReader;
 
 mod pixel_format;
 mod dx10_header;
 
-#[derive(Debug, Error)]
-pub enum DDSError {
-    #[error("Error parsing DDS header: {0}")]
-    ParseError(#[from] binrw::error::Error),
-
-    #[error("Invalid DDS Header: {0}")]
-    HeaderError(String),
-
-    #[error("Invalid Texture Shape: {0}")]
-    ShapeError(#[from] ShapeError),
-
-    #[error("Unsupported format: {0}")]
-    UnsupportedFormat(String),
-
-    #[error("IO Error with file contents")]
-    IOError(#[from] std::io::Error),
-}
-
-impl IntoContainerError for DDSError {
-    fn into(self, op: &'static str) -> ContainerError {
-        ContainerError::DDSError(self, op)
-    }
-}
-
-impl From<TextureError> for DDSError {
-    fn from(value: TextureError) -> Self {
-        match value {
-            TextureError::IO(io) => { Self::IOError(io) }
-            TextureError::Shape(shape) => { Self::ShapeError(shape) }
-        }
-    }
-}
-
-type DDSResult<T = ()> = Result<T, DDSError>;
-
-
-pub fn read_texture(reader: &mut (impl Read + Seek)) -> DDSResult<Texture> {
+//
+pub fn read_texture(reader: &mut (impl Read + Seek)) -> TextureResult {
     let header = DDSHeader::read(reader)?;
     println!("{header:#?}");
     let texture = header.read_with(reader)?;
@@ -150,9 +115,9 @@ struct DDSHeaderIntermediate {
     pub caps1: BitFlags<Caps1>,
     #[br(try_map = BitFlags::from_bits)]
     #[bw(map = | bf | bf.bits())]
-    #[brw(pad_after = 4)]
     pub caps2: BitFlags<Caps2>,
     pub caps3: u32,
+    #[brw(pad_after = 4)]
     pub caps4: u32,
     #[br(if (pixel_format.is_dx10()))]
     pub dx10header: Option<DX10HeaderIntermediate>,
@@ -161,7 +126,7 @@ struct DDSHeaderIntermediate {
 
 // #[bw(map = | h: & DDSHeader | DDSHeaderIntermediate::from( * h))]
 #[derive(Debug, Clone, BinRead)]
-#[br(map = DDSHeaderIntermediate::into)]
+#[br(try_map = DDSHeaderIntermediate::try_into)]
 pub enum DDSHeader {
     Legacy {
         dimensions: Dimensions,
@@ -178,51 +143,51 @@ pub enum DDSHeader {
     },
 }
 
-impl From<DDSHeaderIntermediate> for DDSHeader {
-    fn from(value: DDSHeaderIntermediate) -> Self {
+impl TryFrom<DDSHeaderIntermediate> for DDSHeader {
+    type Error = TextureError;
+
+    fn try_from(value: DDSHeaderIntermediate) -> TextureResult<Self> {
         let mips = value.flags.contains(DDSFlags::MipmapCount).then_some(value.mipmap_count);
         if let Some(dx10header) = value.dx10header {
             let dimensions = match dx10header.dimensionality {
-                Dimensionality::Texture1D => Dimensions::_1D(value.width),
-                Dimensionality::Texture2D => Dimensions::_2D([value.width, value.height]),
-                Dimensionality::Texture3D => Dimensions::_3D([value.width, value.height, value.depth])
+                Dimensionality::Texture1D => Dimensions::try_from([value.width])?,
+                Dimensionality::Texture2D => Dimensions::try_from([value.width, value.height])?,
+                Dimensionality::Texture3D => Dimensions::try_from([value.width, value.height, value.depth])?
             };
             let layers = match dx10header.array_size {
                 0 | 1 => None,
                 l => Some(l)
             };
 
-            DDSHeader::DX10 {
+            Ok(DDSHeader::DX10 {
                 dimensions,
                 mips,
                 layers,
                 is_cubemap: dx10header.cube,
                 dxgi_format: dx10header.dxgi_format,
-            }
+            })
         } else {
             let dimensions = if value.flags.contains(DDSFlags::Depth) {
-                Dimensions::_3D([value.width, value.height, value.depth])
+                Dimensions::try_from([value.width, value.height, value.depth])?
             } else {
-                Dimensions::_2D([value.width, value.height])
+                Dimensions::try_from([value.width, value.height])?
             };
             let faces = value.caps2.contains(Caps2::Cubemap).then_some(
                 value.caps2.iter().filter_map(Caps2::to_cubemap_face).collect_vec()
             );
 
-            DDSHeader::Legacy {
+            Ok(DDSHeader::Legacy {
                 dimensions,
                 mips,
                 faces,
                 format: value.pixel_format,
-            }
+            })
         }
     }
 }
 
 impl ContainerHeader for DDSHeader {
-    type Error = DDSError;
-
-    fn read_with<R: Read + Seek>(&self, reader: &mut R) -> Result<Texture, Self::Error> {
+    fn read_with<R: Read + Seek>(&self, reader: &mut R) -> TextureResult {
         let mut texture_reader = TextureReader { format: self.format()?, reader };
         let layers = self.layers()?;
         let faces = self.faces()?.map(|f| f.into_iter().sorted_by_key(cubemap_order).collect_vec());
@@ -240,21 +205,21 @@ impl ContainerHeader for DDSHeader {
         Ok(texture)
     }
 
-    fn dimensions(&self) -> Result<Dimensions, DDSError> {
+    fn dimensions(&self) -> TextureResult<Dimensions> {
         Ok(match self {
             DDSHeader::Legacy { dimensions, .. } |
             DDSHeader::DX10 { dimensions, .. } => { *dimensions }
         })
     }
 
-    fn layers(&self) -> Result<Option<usize>, DDSError> {
+    fn layers(&self) -> TextureResult<Option<usize>> {
         Ok(match self {
             DDSHeader::DX10 { layers: Some(layers), .. } => { Some(*layers as usize) }
             _ => { None }
         })
     }
 
-    fn faces(&self) -> DDSResult<Option<Vec<CubeFace>>> {
+    fn faces(&self) -> TextureResult<Option<Vec<CubeFace>>> {
         Ok(match self {
             DDSHeader::Legacy { faces, .. } => { faces.clone() }
             DDSHeader::DX10 { is_cubemap, .. } => {
@@ -263,7 +228,7 @@ impl ContainerHeader for DDSHeader {
         })
     }
 
-    fn mips(&self) -> DDSResult<Option<usize>> {
+    fn mips(&self) -> TextureResult<Option<usize>> {
         Ok(match self {
             DDSHeader::Legacy { mips: Some(mips), .. } |
             DDSHeader::DX10 { mips: Some(mips), .. } => Some(*mips as usize),
@@ -271,7 +236,7 @@ impl ContainerHeader for DDSHeader {
         })
     }
 
-    fn format(&self) -> DDSResult<Format> {
+    fn format(&self) -> TextureResult<Format> {
         match *self {
             DDSHeader::Legacy { format, .. } => { format.try_into() }
             DDSHeader::DX10 { dxgi_format, .. } => { dxgi_format.try_into() }

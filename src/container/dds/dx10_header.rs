@@ -1,6 +1,5 @@
 use binrw::{BinRead, BinWrite};
-use super::DDSError::UnsupportedFormat;
-use super::{DDSError, DDSResult};
+use crate::error::TextureError;
 use crate::format::Format;
 
 #[derive(BinRead, BinWrite)]
@@ -129,11 +128,11 @@ pub enum DXGIFormat {
 }
 
 impl TryInto<Format> for DXGIFormat {
-    type Error = DDSError;
+    type Error = TextureError;
 
     fn try_into(self) -> Result<Format, Self::Error> {
         // todo!("DX10 header formats are not currently supported");
-        Err(UnsupportedFormat("DX10 header formats are not currently supported".into()))
+        Err(TextureError::Format("DX10 header formats are not currently supported".into()))
     }
 }
 

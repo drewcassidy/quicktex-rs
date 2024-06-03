@@ -34,37 +34,6 @@ struct PixelFormatIntermediate {
     pub bitmasks: [u32; 4],
 }
 
-/// Alpha format in a [`PixelFormat`] object.
-/// includes both [`DDSAlphaFormat::Alpha`] and [`DDSAlphaFormat::AlphaPixels`] for round-trip
-/// capability. Both map to [`AlphaFormat::Custom`]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum DDSAlphaFormat {
-    AlphaPixels { alpha_mask: u32 },
-    Alpha { alpha_mask: u32 },
-    Opaque,
-}
-
-impl Into<AlphaFormat> for DDSAlphaFormat {
-    fn into(self) -> AlphaFormat {
-        match self {
-            DDSAlphaFormat::AlphaPixels { alpha_mask } => { AlphaFormat::Custom { alpha_mask } }
-            DDSAlphaFormat::Alpha { alpha_mask } => { AlphaFormat::Custom { alpha_mask } }
-            DDSAlphaFormat::Opaque => { AlphaFormat::Opaque }
-        }
-    }
-}
-
-impl From<AlphaFormat> for DDSAlphaFormat {
-    fn from(value: AlphaFormat) -> Self {
-        match value {
-            AlphaFormat::Custom { alpha_mask } |
-            AlphaFormat::Straight { alpha_mask } |
-            AlphaFormat::Premultiplied { alpha_mask } => { DDSAlphaFormat::AlphaPixels { alpha_mask } }
-            AlphaFormat::Opaque => { DDSAlphaFormat::Opaque }
-        }
-    }
-}
-
 /// A four byte format code. Usually an ASCII-like string but sometimes a u32.
 /// For maximum compatibility it's just stored as a byte string, but printed as text in `Debug` if
 /// it's valid UTF-8

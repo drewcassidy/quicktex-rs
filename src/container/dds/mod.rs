@@ -6,13 +6,14 @@ use std::fmt::Debug;
 use std::io::{Read, Seek};
 
 use binrw::prelude::*;
-use enumflags2::{BitFlags, bitflags};
+use enumflags2::{BitFlags, bitflags, make_bitflags};
 use itertools::Itertools;
 use strum::VariantArray;
 
 use crate::container::ContainerHeader;
-use dx10_header::{Dimensionality, DX10HeaderIntermediate, DXGIFormat};
+use dx10_header::{DX10HeaderIntermediate, DXGIFormat};
 use pixel_format::PixelFormat;
+use crate::container::dds::dx10_header::AlphaMode;
 use crate::dimensions::Dimensions;
 use crate::error::{TextureError, TextureResult};
 use crate::format::Format;
@@ -22,7 +23,6 @@ use crate::texture::TextureReader;
 mod pixel_format;
 mod dx10_header;
 
-//
 pub fn read_texture(reader: &mut (impl Read + Seek)) -> TextureResult {
     let header = DDSHeader::read(reader)?;
     println!("{header:#?}");
@@ -120,13 +120,14 @@ struct DDSHeaderIntermediate {
     #[brw(pad_after = 4)]
     pub caps4: u32,
     #[br(if (pixel_format.is_dx10()))]
-    pub dx10header: Option<DX10HeaderIntermediate>,
+    pub dx10_header: Option<DX10HeaderIntermediate>,
 }
 
 
-// #[bw(map = | h: & DDSHeader | DDSHeaderIntermediate::from( * h))]
-#[derive(Debug, Clone, BinRead)]
+#[binrw]
+#[derive(Debug, Clone)]
 #[br(try_map = DDSHeaderIntermediate::try_into)]
+#[bw(try_map = | h: & DDSHeader | DDSHeaderIntermediate::try_from( h.clone() ))]
 pub enum DDSHeader {
     Legacy {
         dimensions: Dimensions,
@@ -140,20 +141,19 @@ pub enum DDSHeader {
         layers: Option<u32>,
         is_cubemap: bool,
         dxgi_format: DXGIFormat,
+        alpha_mode: AlphaMode,
     },
 }
 
 impl TryFrom<DDSHeaderIntermediate> for DDSHeader {
     type Error = TextureError;
 
-    fn try_from(value: DDSHeaderIntermediate) -> TextureResult<Self> {
-        let mips = value.flags.contains(DDSFlags::MipmapCount).then_some(value.mipmap_count);
-        if let Some(dx10header) = value.dx10header {
-            let dimensions = match dx10header.dimensionality {
-                Dimensionality::Texture1D => Dimensions::try_from([value.width])?,
-                Dimensionality::Texture2D => Dimensions::try_from([value.width, value.height])?,
-                Dimensionality::Texture3D => Dimensions::try_from([value.width, value.height, value.depth])?
-            };
+    fn try_from(raw: DDSHeaderIntermediate) -> TextureResult<Self> {
+        // MipmapCount flag might not be set, so count a mipmapcount value greater than 1 as equivalent
+        let mips = (raw.flags.contains(DDSFlags::MipmapCount) || raw.mipmap_count > 1).then_some(raw.mipmap_count);
+
+        if let Some(dx10header) = raw.dx10_header {
+            let dimensions = dx10header.dimensionality.as_dimensions(raw.width, raw.height, raw.depth)?;
             let layers = match dx10header.array_size {
                 0 | 1 => None,
                 l => Some(l)
@@ -165,24 +165,121 @@ impl TryFrom<DDSHeaderIntermediate> for DDSHeader {
                 layers,
                 is_cubemap: dx10header.cube,
                 dxgi_format: dx10header.dxgi_format,
+                alpha_mode: dx10header.alpha_mode,
             })
         } else {
-            let dimensions = if value.flags.contains(DDSFlags::Depth) {
-                Dimensions::try_from([value.width, value.height, value.depth])?
+            let dimensions = if raw.flags.contains(DDSFlags::Depth) {
+                Dimensions::try_from([raw.width, raw.height, raw.depth])?
             } else {
-                Dimensions::try_from([value.width, value.height])?
+                Dimensions::try_from([raw.width, raw.height])?
             };
-            let faces = value.caps2.contains(Caps2::Cubemap).then_some(
-                value.caps2.iter().filter_map(Caps2::to_cubemap_face).collect_vec()
+            let faces = raw.caps2.contains(Caps2::Cubemap).then_some(
+                raw.caps2.iter().filter_map(Caps2::to_cubemap_face).collect_vec()
             );
 
             Ok(DDSHeader::Legacy {
                 dimensions,
                 mips,
                 faces,
-                format: value.pixel_format,
+                format: raw.pixel_format,
             })
         }
+    }
+}
+
+impl TryFrom<DDSHeader> for DDSHeaderIntermediate {
+    type Error = TextureError;
+
+    fn try_from(header: DDSHeader) -> Result<Self, Self::Error> {
+        let mut flags = make_bitflags!(DDSFlags::{Caps | Width | Height | PixelFormat });
+        let mut caps1 = make_bitflags!(Caps1::{Texture});
+        let mut caps2 = BitFlags::<Caps2>::default();
+
+        let format = header.format();
+        let (dimensions, mips, pixel_format, dx10_header) = match header {
+            DDSHeader::Legacy { dimensions, mips, faces, format, .. } => {
+                if let Some(faces) = faces {
+                    caps1 |= Caps1::Complex;
+                    caps2 |= Caps2::Cubemap;
+                    for face in faces {
+                        caps2 |= Caps2::from_cubemap_face(face)
+                    }
+                }
+                (dimensions, mips, format, None)
+            }
+
+            DDSHeader::DX10 { dimensions, mips, layers, is_cubemap, dxgi_format, alpha_mode, .. } => {
+                if is_cubemap {
+                    caps1 |= Caps1::Complex;
+                    caps2 |= Caps2::Cubemap;
+                    for face in CubeFace::VARIANTS {
+                        caps2 |= Caps2::from_cubemap_face(*face)
+                    }
+                }
+
+                if layers.is_some() {
+                    caps1 |= Caps1::Complex;
+                }
+
+                let dx10_header = Some(DX10HeaderIntermediate {
+                    dxgi_format,
+                    dimensionality: dimensions.into(),
+                    cube: is_cubemap,
+                    array_size: layers.unwrap_or(1),
+                    alpha_mode,
+                });
+                (dimensions, mips, PixelFormat::dx10(), dx10_header)
+            }
+        };
+
+
+        let pitch_or_linear_size = match format {
+            // uncompressed format
+            Ok(Format::Uncompressed { pitch, .. }) => {
+                flags |= DDSFlags::Pitch;
+                pitch as u32 * dimensions.width()
+            }
+            // compressed format
+            Ok(format) => {
+                flags |= DDSFlags::LinearSize;
+                format.size_for(dimensions) as u32
+            }
+            // unknown format, just leave as 0 and hope the receiver doesn't mind.
+            // this probably cant be encountered in normal use unless an API user
+            // makes a DDS header from scratch
+            Err(TextureError::Format(_)) => 0,
+            // unexpected error: rethrow
+            Err(err) => return Err(err),
+        };
+
+        let depth = match dimensions {
+            Dimensions::_3D([_, _, depth]) => { depth.into() }
+            _ => 0
+        };
+
+        let mipmap_count = match mips {
+            None => 0u32,
+            Some(m) => {
+                flags |= DDSFlags::MipmapCount;
+                caps1 |= Caps1::Complex;
+                m
+            }
+        };
+
+        Ok(DDSHeaderIntermediate {
+            flags,
+            height: dimensions.height(),
+            width: dimensions.width(),
+            pitch_or_linear_size,
+            depth,
+            mipmap_count,
+            pixel_format,
+            caps1,
+            caps2,
+            caps3: 0,
+            caps4: 0,
+            dx10_header,
+        })
     }
 }
 

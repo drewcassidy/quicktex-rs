@@ -94,7 +94,7 @@ pub enum PixelFormat {
     Uncompressed {
         bit_count: u32,
         color_format: ColorFormat,
-        alpha_format: DDSAlphaFormat,
+        alpha_format: AlphaFormat,
     },
 }
 
@@ -113,11 +113,11 @@ impl From<PixelFormatIntermediate> for PixelFormat {
 
         // Match Alpha flags. extra flags are ignored
         let alpha_format = if flags.contains(PixelFormatFlags::Alpha) {
-            DDSAlphaFormat::Alpha { alpha_mask: bitmasks[3] }
+            AlphaFormat::Custom { alpha_mask: bitmasks[3] }
         } else if flags.contains(PixelFormatFlags::AlphaPixels) {
-            DDSAlphaFormat::AlphaPixels { alpha_mask: bitmasks[3] }
+            AlphaFormat::Custom { alpha_mask: bitmasks[3] }
         } else {
-            DDSAlphaFormat::Opaque
+            AlphaFormat::Opaque
         };
 
         // Match Color flags. extra flags are ignored
@@ -170,15 +170,10 @@ impl From<PixelFormat> for PixelFormatIntermediate {
 
                 // Alpha flag and mask
                 (alpha_flag, bitmasks[3]) = match alpha_format {
-                    DDSAlphaFormat::AlphaPixels { alpha_mask } => {
-                        (PixelFormatFlags::AlphaPixels.into(), alpha_mask)
-                    }
-                    DDSAlphaFormat::Alpha { alpha_mask } => {
-                        (PixelFormatFlags::Alpha.into(), alpha_mask)
-                    }
-                    DDSAlphaFormat::Opaque => {
-                        (BitFlags::default(), 0u32)
-                    }
+                    AlphaFormat::Custom { alpha_mask } |
+                    AlphaFormat::Straight { alpha_mask } |
+                    AlphaFormat::Premultiplied { alpha_mask } => { (PixelFormatFlags::AlphaPixels.into(), alpha_mask) }
+                    AlphaFormat::Opaque => { (BitFlags::default(), 0u32) }
                 };
 
                 // Build intermediate object for conversion with binrw
@@ -224,7 +219,7 @@ impl TryInto<Format> for PixelFormat {
 
                 Ok(Uncompressed {
                     pitch: (bit_count / 8) as usize,
-                    alpha_format: alpha_format.into(),
+                    alpha_format,
                     color_format,
                 })
             }
@@ -238,5 +233,9 @@ impl PixelFormat {
             PixelFormat::FourCC(FourCC(four_cc)) if four_cc == b"DX10" => { true }
             _ => { false }
         }
+    }
+
+    pub fn dx10() -> Self {
+        PixelFormat::FourCC(FourCC(*b"DX10"))
     }
 }

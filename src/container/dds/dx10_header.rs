@@ -1,4 +1,5 @@
 use binrw::{BinRead, BinWrite};
+use crate::dimensions::{DimensionError, Dimensions};
 use crate::error::TextureError;
 use crate::format::Format;
 
@@ -146,10 +147,30 @@ pub(crate) enum Dimensionality {
     Texture3D = 4,
 }
 
+impl From<Dimensions> for Dimensionality {
+    fn from(value: Dimensions) -> Self {
+        match value {
+            Dimensions::_1D(_) => { Dimensionality::Texture1D }
+            Dimensions::_2D(_) => { Dimensionality::Texture2D }
+            Dimensions::_3D(_) => { Dimensionality::Texture3D }
+        }
+    }
+}
+
+impl Dimensionality {
+    pub fn as_dimensions(&self, width: u32, height: u32, depth: u32) -> Result<Dimensions, DimensionError> {
+        match self {
+            Dimensionality::Texture1D => Dimensions::try_from([width]),
+            Dimensionality::Texture2D => Dimensions::try_from([width, height]),
+            Dimensionality::Texture3D => Dimensions::try_from([width, height, depth])
+        }
+    }
+}
+
 #[derive(BinRead, BinWrite)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[brw(little, repr = u32)]
-pub(crate) enum AlphaMode {
+pub enum AlphaMode {
     Unknown = 0,
     Straight = 1,
     Premultiplied = 2,

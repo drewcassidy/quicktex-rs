@@ -1,6 +1,6 @@
 use binrw::{BinRead, BinWrite};
 use crate::dimensions::{DimensionError, Dimensions};
-use crate::error::TextureError;
+use crate::error::{TextureError, TextureResult};
 use crate::format::Format;
 
 #[derive(BinRead, BinWrite)]
@@ -128,15 +128,15 @@ pub enum DXGIFormat {
     V408 = 132,
 }
 
-impl TryInto<Format> for DXGIFormat {
-    type Error = TextureError;
-
-    fn try_into(self) -> Result<Format, Self::Error> {
-        // todo!("DX10 header formats are not currently supported");
-        Err(TextureError::Format("DX10 header formats are not currently supported".into()))
-    }
+pub(crate) fn try_into_format(dxgi_format: &DXGIFormat, alpha_mode: &AlphaMode) -> TextureResult<Format> {
+    // todo: DX10 header formats are not currently supported
+    Err(TextureError::Format("DX10 header formats are not currently supported".into()))
 }
 
+pub(crate) fn try_from_format(format: Format) -> TextureResult<(DXGIFormat, AlphaMode)> {
+    // todo: DX10 header formats are not currently supported
+    Err(TextureError::Format("DX10 header formats are not currently supported".into()))
+}
 
 #[derive(BinRead, BinWrite)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

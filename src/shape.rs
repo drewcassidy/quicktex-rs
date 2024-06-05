@@ -5,8 +5,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::{repeat, zip};
-use std::rc::Rc;
-use std::slice::SliceIndex;
 
 use itertools::Itertools;
 use strum::{Display, VariantArray};
@@ -287,7 +285,7 @@ pub trait TextureShape: Clone + Dimensioned {
 
 /// One node of a texture shape data structure
 #[derive(Clone, Debug)]
-pub(crate) enum TextureShapeNode<S: Sized + Clone + Dimensioned> {
+pub enum TextureShapeNode<S: Sized + Clone + Dimensioned> {
     /// A node representing a texture array
     Array(Vec<Self>),
 

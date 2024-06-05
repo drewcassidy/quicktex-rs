@@ -52,6 +52,10 @@ impl Debug for FourCC {
     }
 }
 
+impl From<&[u8; 4]> for FourCC {
+    fn from(value: &[u8; 4]) -> Self { Self(*value) }
+}
+
 /// Representation of the DDS PixelFormat data structure as an enum.
 /// Either a FourCC or a descriptor of a simple Uncompressed format.
 #[binrw]
@@ -157,12 +161,12 @@ impl From<PixelFormat> for PixelFormatIntermediate {
     }
 }
 
-impl TryInto<Format> for PixelFormat {
+impl TryFrom<PixelFormat> for Format {
     type Error = TextureError;
 
-    fn try_into(self) -> Result<Format, Self::Error> {
+    fn try_from(pf: PixelFormat) -> Result<Format, Self::Error> {
         use crate::format::Format::*;
-        match self {
+        match pf {
             PixelFormat::FourCC(four_cc) => {
                 match &four_cc.0 {
                     b"DX10" => {
@@ -174,7 +178,7 @@ impl TryInto<Format> for PixelFormat {
                     b"DXT5" => Ok(BC3 { srgb: false }), // DXT5, AKA BC3
                     b"BC4U" => Ok(BC4 { signed: false }), // BC4 Unsigned
                     b"BC4S" => Ok(BC4 { signed: true }), // BC4 Signed
-                    b"ATI2" => Ok(BC5 { signed: false }), // BC5 Unsigned
+                    b"ATI2" | b"BC5U" => Ok(BC5 { signed: false }), // BC5 Unsigned
                     b"BC5S" => Ok(BC5 { signed: true }), // BC5 Signed
                     four_cc => Err(TextureError::Format(
                         format!("Unknown FourCC code: '{four_cc:?}'", )
@@ -192,6 +196,31 @@ impl TryInto<Format> for PixelFormat {
                     color_format,
                 })
             }
+        }
+    }
+}
+
+impl TryFrom<Format> for PixelFormat {
+    type Error = TextureError;
+
+    fn try_from(format: Format) -> Result<Self, Self::Error> {
+        #[allow(unreachable_patterns)]
+        match format {
+            Format::BC1 { .. } => { Ok(PixelFormat::FourCC(b"DXT1".into())) }
+            Format::BC2 { .. } => { Ok(PixelFormat::FourCC(b"DXT3".into())) }
+            Format::BC3 { .. } => { Ok(PixelFormat::FourCC(b"DXT5".into())) }
+            Format::BC4 { signed: false } => { Ok(PixelFormat::FourCC(b"BC4U".into())) }
+            Format::BC4 { signed: true } => { Ok(PixelFormat::FourCC(b"BC4S".into())) }
+            Format::BC5 { signed: false } => { Ok(PixelFormat::FourCC(b"ATI2".into())) }
+            Format::BC5 { signed: true } => { Ok(PixelFormat::FourCC(b"BC5S".into())) }
+            Format::Uncompressed { pitch, color_format, alpha_format } => {
+                Ok(PixelFormat::Uncompressed {
+                    bit_count: pitch as u32 * 8,
+                    color_format,
+                    alpha_format,
+                })
+            }
+            _f => Err(TextureError::Format(format!("PixelFormat does not support this format: {_f:?}")))
         }
     }
 }

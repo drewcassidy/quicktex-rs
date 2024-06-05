@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::fmt::Debug;
-use std::io::{Read, Seek};
+use std::fmt::{Debug};
+use std::io::{Write, Read, Seek};
 
 use binrw::prelude::*;
 use enumflags2::{BitFlags, bitflags, make_bitflags};
@@ -14,21 +14,14 @@ use crate::container::ContainerHeader;
 use dx10_header::{DX10HeaderIntermediate, DXGIFormat};
 use pixel_format::PixelFormat;
 use crate::container::dds::dx10_header::AlphaMode;
-use crate::dimensions::Dimensions;
+use crate::dimensions::{Dimensioned, Dimensions};
 use crate::error::{TextureError, TextureResult};
 use crate::format::Format;
-use crate::shape::CubeFace;
-use crate::texture::TextureReader;
+use crate::shape::{CubeFace, TextureShape};
+use crate::texture::{SurfaceReader, Surfaces, Texture};
 
 mod pixel_format;
 mod dx10_header;
-
-pub fn read_texture(reader: &mut (impl Read + Seek)) -> TextureResult {
-    let header = DDSHeader::read(reader)?;
-    println!("{header:#?}");
-    let texture = header.read_with(reader)?;
-    Ok(texture)
-}
 
 #[bitflags]
 #[repr(u32)]
@@ -283,23 +276,102 @@ impl TryFrom<DDSHeader> for DDSHeaderIntermediate {
     }
 }
 
+impl DDSHeader {
+    fn for_texture_legacy(texture: &Texture) -> TextureResult<Self> {
+        if texture.layers().is_some() {
+            return Err(TextureError::Capability("Texture arrays are not supported by legacy DDS headers".to_string()));
+        }
+        let dimensions = texture.dimensions();
+        let mips: Option<u32> = texture.mips().map(|m| m as u32);
+        let faces = texture.faces();
+        let format: PixelFormat = texture.format.try_into()?;
+
+        Ok(DDSHeader::Legacy { dimensions, mips, faces, format })
+    }
+
+    fn for_texture_dx10(texture: &Texture) -> TextureResult<Self> {
+        let dimensions = texture.dimensions();
+        let mips: Option<u32> = texture.mips().map(|m| m as u32);
+        let layers: Option<u32> = texture.layers().map(|m| m as u32);
+        let is_cubemap = match texture.faces() {
+            None => { false }
+            Some(faces) if faces.len() == 6 => { true }
+            Some(_) => {
+                return Err(TextureError::Capability("Incomplete cubemaps are not supported by DX10 DDS headers".to_string()));
+            }
+        };
+        let (dxgi_format, alpha_mode) = dx10_header::try_from_format(texture.format)?;
+
+        Ok(DDSHeader::DX10 { dimensions, mips, layers, is_cubemap, dxgi_format, alpha_mode })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DDSHeaderMode {
+    #[default]
+    PreferLegacy,
+    ForceLegacy,
+    ForceDX10,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DDSHeaderArgs {
+    pub mode: DDSHeaderMode,
+}
+
 impl ContainerHeader for DDSHeader {
-    fn read_with<R: Read + Seek>(&self, reader: &mut R) -> TextureResult {
-        let mut texture_reader = TextureReader { format: self.format()?, reader };
+    type Args = DDSHeaderArgs;
+
+    fn read_surfaces<R: Read + Seek>(&self, reader: &mut R) -> TextureResult<Surfaces> {
+        let mut surface_reader = SurfaceReader { format: self.format()?, reader };
         let layers = self.layers()?;
         let faces = self.faces()?.map(|f| f.into_iter().sorted_by_key(cubemap_order).collect_vec());
         let mips = self.mips()?;
 
         // DDS files are ordered as Array(Cubemap(Mipmap(Surface)))
         // yes this is confusing I couldn't figure out how to abstract it
-        let texture =
-            texture_reader.read_layers(self.dimensions()?, layers, |r: &mut TextureReader<R>, d| {
-                r.read_faces(d, faces.clone(), |r: &mut TextureReader<R>, d| {
-                    r.read_mips(d, mips, TextureReader::<R>::read_surface)
-                })
-            })?;
+        surface_reader.read_layers(self.dimensions()?, layers, |r: &mut SurfaceReader<R>, d| {
+            r.read_faces(d, faces.clone(), |r: &mut SurfaceReader<R>, d| {
+                r.read_mips(d, mips, SurfaceReader::<R>::read_surface)
+            })
+        })
+    }
 
-        Ok(texture)
+    fn write_surfaces<W: Write + Seek>(&self, writer: &mut W, surfaces: Surfaces) -> TextureResult<()> {
+        for (_, layer) in surfaces.iter_layers() {
+            for (_, face) in layer.iter_faces()
+                .sorted_by_key(|(c, _)| c.map_or(0, |c| cubemap_order(&c))) {
+                for (_, mip) in face.iter_mips() {
+                    writer.write(
+                        &*mip.try_into_surface()
+                            .expect("Innermost shape is not a surface")
+                            .buffer)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn for_texture_args(texture: &Texture, args: &<Self as ContainerHeader>::Args) -> TextureResult<Self> {
+        if args.mode != DDSHeaderMode::ForceDX10 {
+            // try to make a legacy header
+
+            match Self::for_texture_legacy(texture) {
+                Ok(header) => return Ok(header),
+
+                // cant try again, return
+                Err(e) if args.mode == DDSHeaderMode::ForceLegacy => return Err(e),
+
+                // ignore capability  and format errors, will retry with DX10
+                Err(TextureError::Capability(_) | TextureError::Format(_)) => {}
+
+                // other errors should be rethrown
+                Err(e) => return Err(e)
+            }
+        }
+
+        // try to make a DX10 header
+        Self::for_texture_dx10(texture)
     }
 
     fn dimensions(&self) -> TextureResult<Dimensions> {
@@ -334,9 +406,9 @@ impl ContainerHeader for DDSHeader {
     }
 
     fn format(&self) -> TextureResult<Format> {
-        match *self {
-            DDSHeader::Legacy { format, .. } => { format.try_into() }
-            DDSHeader::DX10 { dxgi_format, .. } => { dxgi_format.try_into() }
+        match self {
+            DDSHeader::Legacy { format, .. } => { (*format).try_into() }
+            DDSHeader::DX10 { dxgi_format, alpha_mode, .. } => { dx10_header::try_into_format(dxgi_format, alpha_mode) }
         }
     }
 }

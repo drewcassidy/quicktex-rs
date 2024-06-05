@@ -7,7 +7,6 @@ use std::io::Read;
 use std::rc::Rc;
 
 use itertools::Itertools;
-use thiserror::Error;
 
 use crate::dimensions::{Dimensioned, Dimensions};
 use crate::error::TextureResult;
@@ -17,8 +16,8 @@ use crate::shape::{CubeFace, ShapeError, TextureIndex, TextureShape, TextureShap
 /// A single surface of a [`Texture`], consisting of dimensions and a buffer of bytes
 #[derive(Clone)]
 pub struct Surface {
-    dimensions: Dimensions,
-    buffer: Rc<[u8]>,
+    pub(crate) dimensions: Dimensions,
+    pub(crate) buffer: Rc<[u8]>,
 }
 
 impl Debug for Surface {
@@ -32,16 +31,18 @@ impl Dimensioned for Surface {
     fn dimensions(&self) -> Dimensions { self.dimensions }
 }
 
+pub type Surfaces = TextureShapeNode<Surface>;
+
 
 /// Struct to simplify reading a texture from a file
-pub struct TextureReader<'a, R: Read> {
+pub struct SurfaceReader<'a, R: Read> {
     pub format: Format,
     pub reader: &'a mut R,
 }
 
-impl<'a, R: Read> TextureReader<'a, R> {
+impl<'a, R: Read> SurfaceReader<'a, R> {
     /// Read a single surface from a binary reader using the given dimensions
-    pub fn read_surface(&mut self, dimensions: Dimensions) -> TextureResult
+    pub fn read_surface(&mut self, dimensions: Dimensions) -> TextureResult<Surfaces>
     {
         let size = self.format.size_for(dimensions);
         let mut buffer: Vec<u8> = vec![0; size];
@@ -52,26 +53,26 @@ impl<'a, R: Read> TextureReader<'a, R> {
 
         let surfaces = TextureShapeNode::Surface(Surface { dimensions, buffer });
 
-        return Ok(Texture { format: self.format, surfaces });
+        return Ok(surfaces);
     }
 
     /// Construct a mipmap out of the textures produced by `inner`, or short circuit to `inner` if `mip_count` is [`None`]
-    pub fn read_mips<F>(&mut self, dimensions: Dimensions, mip_count: Option<usize>, mut inner: F) -> TextureResult
-        where F: FnMut(&mut Self, Dimensions) -> TextureResult
+    pub fn read_mips<F>(&mut self, dimensions: Dimensions, mip_count: Option<usize>, mut inner: F) -> TextureResult<Surfaces>
+        where F: FnMut(&mut Self, Dimensions) -> TextureResult<Surfaces>
     {
         if let Some(mip_count) = mip_count {
-            let textures = dimensions.mips().take(mip_count)
+            let surfaces = dimensions.mips().take(mip_count)
                 .map(|d| inner(self, d))
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(Texture::try_from_mips(textures)?)
+            Ok(Surfaces::try_from_mips(surfaces)?)
         } else {
             inner(self, dimensions)
         }
     }
 
     /// Construct a cubemap out of the textures produced by `inner`, or short circuit to `inner` if `faces` is [`None`]
-    pub fn read_faces<F>(&mut self, dimensions: Dimensions, faces: Option<Vec<CubeFace>>, mut inner: F) -> TextureResult
-        where F: FnMut(&mut Self, Dimensions) -> TextureResult
+    pub fn read_faces<F>(&mut self, dimensions: Dimensions, faces: Option<Vec<CubeFace>>, mut inner: F) -> TextureResult<Surfaces>
+        where F: FnMut(&mut Self, Dimensions) -> TextureResult<Surfaces>
     {
         if let Some(faces) = faces {
             let textures = faces.into_iter()
@@ -79,21 +80,21 @@ impl<'a, R: Read> TextureReader<'a, R> {
                     Ok((f, inner(self, dimensions)?))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(Texture::try_from_faces(textures)?)
+            Ok(Surfaces::try_from_faces(textures)?)
         } else {
             inner(self, dimensions)
         }
     }
 
     /// Construct an array out of the textures produced by `inner`, or short circuit to `inner` if `layer_count` is [`None`]
-    pub fn read_layers<F>(&mut self, dimensions: Dimensions, layer_count: Option<usize>, mut inner: F) -> TextureResult
-        where F: FnMut(&mut Self, Dimensions) -> TextureResult
+    pub fn read_layers<F>(&mut self, dimensions: Dimensions, layer_count: Option<usize>, mut inner: F) -> TextureResult<Surfaces>
+        where F: FnMut(&mut Self, Dimensions) -> TextureResult<Surfaces>
     {
         if let Some(layer_count) = layer_count {
             let textures = (0..layer_count)
                 .map(|_| inner(self, dimensions))
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(Texture::try_from_layers(textures)?)
+            Ok(Surfaces::try_from_layers(textures)?)
         } else {
             inner(self, dimensions)
         }
@@ -103,8 +104,8 @@ impl<'a, R: Read> TextureReader<'a, R> {
 /// An encoded texture, consisting of a [`Format`] and one or more [`Surface`]s
 #[derive(Clone, Debug)]
 pub struct Texture {
-    format: Format,
-    surfaces: TextureShapeNode<Surface>,
+    pub(crate) format: Format,
+    pub(crate) surfaces: TextureShapeNode<Surface>,
 }
 
 impl Dimensioned for Texture {

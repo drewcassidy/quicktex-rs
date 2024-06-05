@@ -50,6 +50,7 @@ pub enum ColorFormat {
 }
 
 
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Format {
     BC1 { srgb: bool },

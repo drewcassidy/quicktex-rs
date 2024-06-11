@@ -2,9 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::fmt::Debug;
 use crate::dimensions::Dimensions;
-
+use std::fmt::Debug;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AlphaFormat {
@@ -41,23 +40,30 @@ pub enum ColorFormat {
     },
 
     /// Luminance-only color channels
-    L {
-        l_mask: u32,
-    },
+    L { l_mask: u32 },
 
     /// No color information, e.g. alpha only
     None,
 }
 
-
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Format {
-    BC1 { srgb: bool },
-    BC2 { srgb: bool },
-    BC3 { srgb: bool },
-    BC4 { signed: bool },
-    BC5 { signed: bool },
+    BC1 {
+        srgb: bool,
+    },
+    BC2 {
+        srgb: bool,
+    },
+    BC3 {
+        srgb: bool,
+    },
+    BC4 {
+        signed: bool,
+    },
+    BC5 {
+        signed: bool,
+    },
     Uncompressed {
         pitch: usize,
         color_format: ColorFormat,
@@ -75,14 +81,16 @@ impl Format {
         use Format::*;
         match self {
             BC1 { .. } | BC4 { .. } => {
-                8 * dimensions.blocks(Dimensions::try_from([4, 4]).unwrap()).product() as usize
+                8 * dimensions
+                    .blocks(Dimensions::try_from([4, 4]).unwrap())
+                    .product() as usize
             }
             BC2 { .. } | BC3 { .. } | BC5 { .. } => {
-                16 * dimensions.blocks(Dimensions::try_from([4, 4]).unwrap()).product() as usize
+                16 * dimensions
+                    .blocks(Dimensions::try_from([4, 4]).unwrap())
+                    .product() as usize
             }
-            Uncompressed { pitch, .. } => {
-                *pitch * dimensions.product() as usize
-            }
+            Uncompressed { pitch, .. } => *pitch * dimensions.product() as usize,
         }
     }
 }

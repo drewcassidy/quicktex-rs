@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::fmt::Formatter;
 use std::fmt::Debug;
-use std::iter::{Map, zip};
+use std::fmt::Formatter;
+use std::iter::{zip, Map};
 use std::num::{NonZeroU32, TryFromIntError};
 
 use itertools::Itertools;
@@ -29,7 +29,6 @@ pub enum Dimensions {
 }
 
 static DIMENSION_NAMES: [&'static str; 3] = ["width", "height", "depth"];
-
 
 impl Dimensions {
     pub fn len(self) -> usize {
@@ -74,25 +73,28 @@ impl Dimensions {
     }
 
     pub fn blocks(self, block: Dimensions) -> Dimensions {
-        let rounding_divide = |(size, bsize)| -> u32 {
-            (size + (bsize - 1)) / bsize
-        };
+        let rounding_divide = |(size, bsize)| -> u32 { (size + (bsize - 1)) / bsize };
 
-        let result_vec = self.into_iter()
+        let result_vec = self
+            .into_iter()
             .zip_longest(block.into_iter())
             .map(|b| rounding_divide(b.or_else(|| 1u32, || 1u32)))
             .collect_vec();
 
-        result_vec.try_into().expect("Dimensions somehow changed size")
+        result_vec
+            .try_into()
+            .expect("Dimensions somehow changed size")
     }
 }
 
 impl Debug for Dimensions {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Dimensions::_1D(width) => { f.write_str(format!("{width} wide").as_str()) }
-            Dimensions::_2D([width, height]) => { f.write_str(format!("{width}x{height}").as_str()) }
-            Dimensions::_3D([width, height, depth]) => { f.write_str(format!("{width}x{height}x{depth}").as_str()) }
+            Dimensions::_1D(width) => f.write_str(format!("{width} wide").as_str()),
+            Dimensions::_2D([width, height]) => f.write_str(format!("{width}x{height}").as_str()),
+            Dimensions::_3D([width, height, depth]) => {
+                f.write_str(format!("{width}x{height}x{depth}").as_str())
+            }
         }
     }
 }
@@ -100,14 +102,17 @@ impl Debug for Dimensions {
 impl AsRef<[NonZeroU32]> for Dimensions {
     fn as_ref(&self) -> &[NonZeroU32] {
         match self {
-            Dimensions::_1D(width) => { width.as_slice() }
-            Dimensions::_2D(v) => { &v[..] }
-            Dimensions::_3D(v) => { &v[..] }
+            Dimensions::_1D(width) => width.as_slice(),
+            Dimensions::_2D(v) => &v[..],
+            Dimensions::_3D(v) => &v[..],
         }
     }
 }
 
-impl<'a> IntoIterator for &'a Dimensions where Self: 'a {
+impl<'a> IntoIterator for &'a Dimensions
+where
+    Self: 'a,
+{
     type Item = u32;
     type IntoIter = Map<std::slice::Iter<'a, NonZeroU32>, fn(&NonZeroU32) -> u32>;
 
@@ -130,9 +135,9 @@ impl TryFrom<&[u32]> for Dimensions {
     type Error = DimensionError;
 
     fn try_from(value: &[u32]) -> Result<Self, Self::Error> {
-        let inner: Vec<NonZeroU32> =
-            zip(DIMENSION_NAMES.into_iter(), value.into_iter())
-                .map(|(i, d)| NonZeroU32::try_from(*d).map_err(|e| DimensionError::Invalid(i, e))).try_collect()?;
+        let inner: Vec<NonZeroU32> = zip(DIMENSION_NAMES.into_iter(), value.into_iter())
+            .map(|(i, d)| NonZeroU32::try_from(*d).map_err(|e| DimensionError::Invalid(i, e)))
+            .try_collect()?;
 
         match inner.len() {
             1 => Ok(Dimensions::_1D(inner[0])),
@@ -157,7 +162,6 @@ impl<const N: usize> TryFrom<[u32; N]> for Dimensions {
         Self::try_from(&value[..])
     }
 }
-
 
 pub struct MipDimensionIterator {
     current: Option<Dimensions>,
@@ -188,4 +192,3 @@ impl Iterator for MipDimensionIterator {
 pub trait Dimensioned {
     fn dimensions(&self) -> Dimensions;
 }
-

@@ -1,10 +1,9 @@
-use binrw::{BinRead, BinWrite};
 use crate::dimensions::{DimensionError, Dimensions};
 use crate::error::{TextureError, TextureResult};
 use crate::format::Format;
+use binrw::{BinRead, BinWrite};
 
-#[derive(BinRead, BinWrite)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(BinRead, BinWrite, Debug, Copy, Clone, PartialEq, Eq)]
 #[brw(little, repr = u32)]
 pub enum DXGIFormat {
     Unknown = 0,
@@ -128,18 +127,24 @@ pub enum DXGIFormat {
     V408 = 132,
 }
 
-pub(crate) fn try_into_format(dxgi_format: &DXGIFormat, alpha_mode: &AlphaMode) -> TextureResult<Format> {
+pub(crate) fn try_into_format(
+    dxgi_format: &DXGIFormat,
+    alpha_mode: &AlphaMode,
+) -> TextureResult<Format> {
     // todo: DX10 header formats are not currently supported
-    Err(TextureError::Format("DX10 header formats are not currently supported".into()))
+    Err(TextureError::Format(
+        "DX10 header formats are not currently supported".into(),
+    ))
 }
 
 pub(crate) fn try_from_format(format: Format) -> TextureResult<(DXGIFormat, AlphaMode)> {
     // todo: DX10 header formats are not currently supported
-    Err(TextureError::Format("DX10 header formats are not currently supported".into()))
+    Err(TextureError::Format(
+        "DX10 header formats are not currently supported".into(),
+    ))
 }
 
-#[derive(BinRead, BinWrite)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(BinRead, BinWrite, Debug, Copy, Clone, PartialEq, Eq)]
 #[brw(little, repr = u32)]
 pub(crate) enum Dimensionality {
     Texture1D = 2,
@@ -150,25 +155,29 @@ pub(crate) enum Dimensionality {
 impl From<Dimensions> for Dimensionality {
     fn from(value: Dimensions) -> Self {
         match value {
-            Dimensions::_1D(_) => { Dimensionality::Texture1D }
-            Dimensions::_2D(_) => { Dimensionality::Texture2D }
-            Dimensions::_3D(_) => { Dimensionality::Texture3D }
+            Dimensions::_1D(_) => Dimensionality::Texture1D,
+            Dimensions::_2D(_) => Dimensionality::Texture2D,
+            Dimensions::_3D(_) => Dimensionality::Texture3D,
         }
     }
 }
 
 impl Dimensionality {
-    pub fn as_dimensions(&self, width: u32, height: u32, depth: u32) -> Result<Dimensions, DimensionError> {
+    pub fn as_dimensions(
+        &self,
+        width: u32,
+        height: u32,
+        depth: u32,
+    ) -> Result<Dimensions, DimensionError> {
         match self {
             Dimensionality::Texture1D => Dimensions::try_from([width]),
             Dimensionality::Texture2D => Dimensions::try_from([width, height]),
-            Dimensionality::Texture3D => Dimensions::try_from([width, height, depth])
+            Dimensionality::Texture3D => Dimensions::try_from([width, height, depth]),
         }
     }
 }
 
-#[derive(BinRead, BinWrite)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(BinRead, BinWrite, Debug, Copy, Clone, PartialEq, Eq)]
 #[brw(little, repr = u32)]
 pub enum AlphaMode {
     Unknown = 0,
@@ -178,8 +187,7 @@ pub enum AlphaMode {
     Custom = 4,
 }
 
-#[derive(BinRead, BinWrite)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(BinRead, BinWrite, Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) struct DX10HeaderIntermediate {
     pub dxgi_format: DXGIFormat,
     pub dimensionality: Dimensionality,

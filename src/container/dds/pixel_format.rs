@@ -1,9 +1,9 @@
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
 
-use binrw::prelude::*;
-use enumflags2::{BitFlags, bitflags};
 use crate::error::TextureError;
+use binrw::prelude::*;
+use enumflags2::{bitflags, BitFlags};
 
 use crate::format::{AlphaFormat, ColorFormat, Format};
 
@@ -53,7 +53,9 @@ impl Debug for FourCC {
 }
 
 impl From<&[u8; 4]> for FourCC {
-    fn from(value: &[u8; 4]) -> Self { Self(*value) }
+    fn from(value: &[u8; 4]) -> Self {
+        Self(*value)
+    }
 }
 
 /// Representation of the DDS PixelFormat data structure as an enum.
@@ -71,12 +73,14 @@ pub enum PixelFormat {
     },
 }
 
-
 impl From<PixelFormatIntermediate> for PixelFormat {
     fn from(value: PixelFormatIntermediate) -> Self {
         // unpack intermediate struct converted with binrw
         let PixelFormatIntermediate {
-            flags, four_cc, bit_count, bitmasks
+            flags,
+            four_cc,
+            bit_count,
+            bitmasks,
         } = value;
 
         // If FourCC is set, just return immediately
@@ -86,25 +90,44 @@ impl From<PixelFormatIntermediate> for PixelFormat {
 
         // Match Alpha flags. extra flags are ignored
         let alpha_format = if flags.contains(PixelFormatFlags::Alpha) {
-            AlphaFormat::Custom { alpha_mask: bitmasks[3] }
+            AlphaFormat::Custom {
+                alpha_mask: bitmasks[3],
+            }
         } else if flags.contains(PixelFormatFlags::AlphaPixels) {
-            AlphaFormat::Custom { alpha_mask: bitmasks[3] }
+            AlphaFormat::Custom {
+                alpha_mask: bitmasks[3],
+            }
         } else {
             AlphaFormat::Opaque
         };
 
         // Match Color flags. extra flags are ignored
         let color_format = if flags.contains(PixelFormatFlags::RGB) {
-            ColorFormat::RGB { r_mask: bitmasks[0], g_mask: bitmasks[1], b_mask: bitmasks[2], srgb: false }
+            ColorFormat::RGB {
+                r_mask: bitmasks[0],
+                g_mask: bitmasks[1],
+                b_mask: bitmasks[2],
+                srgb: false,
+            }
         } else if flags.contains(PixelFormatFlags::YUV) {
-            ColorFormat::YUV { y_mask: bitmasks[0], u_mask: bitmasks[1], v_mask: bitmasks[2] }
+            ColorFormat::YUV {
+                y_mask: bitmasks[0],
+                u_mask: bitmasks[1],
+                v_mask: bitmasks[2],
+            }
         } else if flags.contains(PixelFormatFlags::Luminance) {
-            ColorFormat::L { l_mask: bitmasks[0] }
+            ColorFormat::L {
+                l_mask: bitmasks[0],
+            }
         } else {
             ColorFormat::None
         };
 
-        PixelFormat::Uncompressed { bit_count, color_format, alpha_format }
+        PixelFormat::Uncompressed {
+            bit_count,
+            color_format,
+            alpha_format,
+        }
     }
 }
 
@@ -120,33 +143,42 @@ impl From<PixelFormat> for PixelFormatIntermediate {
                     bitmasks: [0u32; 4],
                 }
             }
-            PixelFormat::Uncompressed { bit_count: pitch, color_format, alpha_format } => {
+            PixelFormat::Uncompressed {
+                bit_count: pitch,
+                color_format,
+                alpha_format,
+            } => {
                 let mut bitmasks = [0u32; 4];
                 let color_flag: BitFlags<PixelFormatFlags>;
                 let alpha_flag: BitFlags<PixelFormatFlags>;
 
                 // Color flag and masks
                 (color_flag, bitmasks[0], bitmasks[1], bitmasks[2]) = match color_format {
-                    ColorFormat::RGB { r_mask, g_mask, b_mask, .. } => {
-                        (PixelFormatFlags::RGB.into(), r_mask, g_mask, b_mask)
-                    }
-                    ColorFormat::YUV { y_mask, u_mask, v_mask } => {
-                        (PixelFormatFlags::YUV.into(), y_mask, u_mask, v_mask)
-                    }
+                    ColorFormat::RGB {
+                        r_mask,
+                        g_mask,
+                        b_mask,
+                        ..
+                    } => (PixelFormatFlags::RGB.into(), r_mask, g_mask, b_mask),
+                    ColorFormat::YUV {
+                        y_mask,
+                        u_mask,
+                        v_mask,
+                    } => (PixelFormatFlags::YUV.into(), y_mask, u_mask, v_mask),
                     ColorFormat::L { l_mask } => {
                         (PixelFormatFlags::Luminance.into(), l_mask, 0u32, 0u32)
                     }
-                    ColorFormat::None => {
-                        (BitFlags::default(), 0u32, 0u32, 0u32)
-                    }
+                    ColorFormat::None => (BitFlags::default(), 0u32, 0u32, 0u32),
                 };
 
                 // Alpha flag and mask
                 (alpha_flag, bitmasks[3]) = match alpha_format {
-                    AlphaFormat::Custom { alpha_mask } |
-                    AlphaFormat::Straight { alpha_mask } |
-                    AlphaFormat::Premultiplied { alpha_mask } => { (PixelFormatFlags::AlphaPixels.into(), alpha_mask) }
-                    AlphaFormat::Opaque => { (BitFlags::default(), 0u32) }
+                    AlphaFormat::Custom { alpha_mask }
+                    | AlphaFormat::Straight { alpha_mask }
+                    | AlphaFormat::Premultiplied { alpha_mask } => {
+                        (PixelFormatFlags::AlphaPixels.into(), alpha_mask)
+                    }
+                    AlphaFormat::Opaque => (BitFlags::default(), 0u32),
                 };
 
                 // Build intermediate object for conversion with binrw
@@ -169,10 +201,9 @@ impl TryFrom<PixelFormat> for Format {
         match pf {
             PixelFormat::FourCC(four_cc) => {
                 match &four_cc.0 {
-                    b"DX10" => {
-                        Err(TextureError::Format(
-                            "Cannot convert DX10 PixelFormat".to_string()))
-                    } // DX10 header must be stored elsewhere
+                    b"DX10" => Err(TextureError::Format(
+                        "Cannot convert DX10 PixelFormat".to_string(),
+                    )), // DX10 header must be stored elsewhere
                     b"DXT1" => Ok(BC1 { srgb: false }), // DXT1, AKA BC1
                     b"DXT3" => Ok(BC2 { srgb: false }), // DXT3, AKA BC2
                     b"DXT5" => Ok(BC3 { srgb: false }), // DXT5, AKA BC3
@@ -180,14 +211,20 @@ impl TryFrom<PixelFormat> for Format {
                     b"BC4S" => Ok(BC4 { signed: true }), // BC4 Signed
                     b"ATI2" | b"BC5U" => Ok(BC5 { signed: false }), // BC5 Unsigned
                     b"BC5S" => Ok(BC5 { signed: true }), // BC5 Signed
-                    four_cc => Err(TextureError::Format(
-                        format!("Unknown FourCC code: '{four_cc:?}'", )
-                    )),
+                    four_cc => Err(TextureError::Format(format!(
+                        "Unknown FourCC code: '{four_cc:?}'",
+                    ))),
                 }
             }
-            PixelFormat::Uncompressed { bit_count, alpha_format, color_format } => {
+            PixelFormat::Uncompressed {
+                bit_count,
+                alpha_format,
+                color_format,
+            } => {
                 if bit_count % 8 != 0 {
-                    return Err(TextureError::Format(format!("BitCount {bit_count} is not divisible by 8")));
+                    return Err(TextureError::Format(format!(
+                        "BitCount {bit_count} is not divisible by 8"
+                    )));
                 }
 
                 Ok(Uncompressed {
@@ -206,21 +243,25 @@ impl TryFrom<Format> for PixelFormat {
     fn try_from(format: Format) -> Result<Self, Self::Error> {
         #[allow(unreachable_patterns)]
         match format {
-            Format::BC1 { .. } => { Ok(PixelFormat::FourCC(b"DXT1".into())) }
-            Format::BC2 { .. } => { Ok(PixelFormat::FourCC(b"DXT3".into())) }
-            Format::BC3 { .. } => { Ok(PixelFormat::FourCC(b"DXT5".into())) }
-            Format::BC4 { signed: false } => { Ok(PixelFormat::FourCC(b"BC4U".into())) }
-            Format::BC4 { signed: true } => { Ok(PixelFormat::FourCC(b"BC4S".into())) }
-            Format::BC5 { signed: false } => { Ok(PixelFormat::FourCC(b"ATI2".into())) }
-            Format::BC5 { signed: true } => { Ok(PixelFormat::FourCC(b"BC5S".into())) }
-            Format::Uncompressed { pitch, color_format, alpha_format } => {
-                Ok(PixelFormat::Uncompressed {
-                    bit_count: pitch as u32 * 8,
-                    color_format,
-                    alpha_format,
-                })
-            }
-            _f => Err(TextureError::Format(format!("PixelFormat does not support this format: {_f:?}")))
+            Format::BC1 { .. } => Ok(PixelFormat::FourCC(b"DXT1".into())),
+            Format::BC2 { .. } => Ok(PixelFormat::FourCC(b"DXT3".into())),
+            Format::BC3 { .. } => Ok(PixelFormat::FourCC(b"DXT5".into())),
+            Format::BC4 { signed: false } => Ok(PixelFormat::FourCC(b"BC4U".into())),
+            Format::BC4 { signed: true } => Ok(PixelFormat::FourCC(b"BC4S".into())),
+            Format::BC5 { signed: false } => Ok(PixelFormat::FourCC(b"ATI2".into())),
+            Format::BC5 { signed: true } => Ok(PixelFormat::FourCC(b"BC5S".into())),
+            Format::Uncompressed {
+                pitch,
+                color_format,
+                alpha_format,
+            } => Ok(PixelFormat::Uncompressed {
+                bit_count: pitch as u32 * 8,
+                color_format,
+                alpha_format,
+            }),
+            _f => Err(TextureError::Format(format!(
+                "PixelFormat does not support this format: {_f:?}"
+            ))),
         }
     }
 }
@@ -228,8 +269,8 @@ impl TryFrom<Format> for PixelFormat {
 impl PixelFormat {
     pub fn is_dx10(&self) -> bool {
         match self {
-            PixelFormat::FourCC(FourCC(four_cc)) if four_cc == b"DX10" => { true }
-            _ => { false }
+            PixelFormat::FourCC(FourCC(four_cc)) if four_cc == b"DX10" => true,
+            _ => false,
         }
     }
 

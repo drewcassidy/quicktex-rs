@@ -10,8 +10,8 @@ pub trait Block: Sized {
 }
 
 struct BlockTexture<B>
-    where
-        B: Block,
+where
+    B: Block,
 {
     width: usize,
     height: usize,

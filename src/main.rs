@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use quicktex::container::{dds, ContainerHeader};
 use std::fs::File;
-use quicktex::container::{ContainerHeader, dds};
 
 fn main() {
     let mut the_file = File::open("/Users/drewcassidy/Downloads/cmft_cubemap.dds").unwrap();

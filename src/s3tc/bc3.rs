@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use crate::blocktexture::Block;
 use crate::s3tc::bc1::BC1Block;
 use crate::s3tc::bc4::BC4Block;
-use crate::blocktexture::Block;
 
 pub struct BC3Block(BC1Block, BC4Block);
 

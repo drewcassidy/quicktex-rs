@@ -15,20 +15,27 @@ use crate::texture::{Surfaces, Texture};
 
 pub mod dds;
 
-
 pub trait ContainerHeader: Sized + Clone + Debug + BinRead + BinWrite
-    where for<'a> <Self as BinRead>::Args<'a>: Default, for<'a> <Self as BinWrite>::Args<'a>: Default
-
+where
+    for<'a> <Self as BinRead>::Args<'a>: Default,
+    for<'a> <Self as BinWrite>::Args<'a>: Default,
 {
     type Args: Default;
 
     fn read_surfaces<R: Read + Seek>(&self, reader: &mut R) -> TextureResult<Surfaces>;
-    fn write_surfaces<W: Write + Seek>(&self, writer: &mut W, surfaces: Surfaces) -> TextureResult<()>;
+    fn write_surfaces<W: Write + Seek>(
+        &self,
+        writer: &mut W,
+        surfaces: Surfaces,
+    ) -> TextureResult<()>;
 
     fn for_texture(texture: &Texture) -> TextureResult<Self> {
         Self::for_texture_args(texture, &Default::default())
     }
-    fn for_texture_args(texture: &Texture, args: &<Self as ContainerHeader>::Args) -> TextureResult<Self>;
+    fn for_texture_args(
+        texture: &Texture,
+        args: &<Self as ContainerHeader>::Args,
+    ) -> TextureResult<Self>;
 
     fn read_texture<R: Read + Seek>(reader: &mut R) -> TextureResult<Texture> {
         let header: Self = reader.read_le()?;
@@ -41,8 +48,13 @@ pub trait ContainerHeader: Sized + Clone + Debug + BinRead + BinWrite
         Self::write_texture_args(writer, texture, &Default::default())
     }
 
-    fn write_texture_args<W>(writer: &mut W, texture: &Texture, args: &<Self as ContainerHeader>::Args) -> TextureResult<()>
-        where W: Write + Seek
+    fn write_texture_args<W>(
+        writer: &mut W,
+        texture: &Texture,
+        args: &<Self as ContainerHeader>::Args,
+    ) -> TextureResult<()>
+    where
+        W: Write + Seek,
     {
         let header: Self = Self::for_texture_args(texture, args)?;
         writer.write_le(&header)?;

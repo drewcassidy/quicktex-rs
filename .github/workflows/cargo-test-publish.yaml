@@ -14,11 +14,13 @@ jobs:
           python-version: '3.12'
 
       - name: Setup Yaclog
-        run: |
-          pip install yaclog~=1.1
+        run: pip install yaclog~=1.1
 
       - name: Setup Rust
         run: rustup toolchain install stable --profile minimal --component rustfmt
+
+      - name: Setup NVTT
+        run: sudo apt install libnvtt-bin
 
       - name: Run Checks
         run: |

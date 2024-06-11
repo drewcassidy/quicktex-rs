@@ -8,7 +8,6 @@ use std::io::Read;
 use std::process::Command;
 
 use anyhow::Result;
-use binrw::BinRead;
 use tempfile::tempdir;
 
 use quicktex::container::ContainerHeader;
@@ -22,7 +21,6 @@ const CUBEMAP_FACES: [&str; 6] = ["+X", "-X", "+Y", "-Y", "+Z", "-Z"];
 
 #[test]
 fn load_cubemap() -> Result<()> {
-    use quicktex::texture::*;
     let d = tempdir()?;
     set_current_dir(d.path())?;
     // println!("{:?}", current_dir());
@@ -40,7 +38,7 @@ fn load_cubemap() -> Result<()> {
     // println!("{texture:#?}");
 
     let format = texture.format;
-    let (pitch, color_format, alpha_format) = match format {
+    let (pitch, _color_format, _alpha_format) = match format {
         Format::Uncompressed {
             pitch,
             color_format,
@@ -71,12 +69,16 @@ fn load_cubemap() -> Result<()> {
     let faces = texture.faces().expect("missing faces");
     assert_eq!(faces.len(), 6, "incomplete cubemap");
 
-    for (face, surface) in texture.iter_faces() {
+    for (_face, surface) in texture.iter_faces() {
         let surface = surface
             .try_into_surface()
             .expect("Cubemap faces should be surface primitives");
         let buffer = &surface.buffer;
-        assert_eq!(surface.dimensions(), Dimensions::try_from([128, 128])?, "Incorrect image dimensions");
+        assert_eq!(
+            surface.dimensions(),
+            Dimensions::try_from([128, 128])?,
+            "Incorrect image dimensions"
+        );
         assert_eq!(buffer.len(), 128 * 128 * pitch, "Incorrect buffer size");
 
         // test that the images are all loaded on the right boundaries

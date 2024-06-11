@@ -40,28 +40,31 @@ fn load_cubemap() -> Result<()> {
     // println!("{texture:#?}");
 
     let format = texture.format;
-    if let Format::Uncompressed {
-        pitch,
-        color_format,
-        alpha_format,
-    } = format
-    {
-        // surprise! not all nvtt binaries use the same pitch with nvassemble
-        // assert_eq!(pitch, 3, "Format should be 3-byte pitch");
-        assert_eq!(
+    let (pitch, color_format, alpha_format) = match format {
+        Format::Uncompressed {
+            pitch,
             color_format,
-            ColorFormat::RGB {
-                r_mask: 0xFF0000,
-                g_mask: 0xFF00,
-                b_mask: 0xFF,
-                srgb: false,
-            },
-            "Incorrect color format"
-        );
-        assert_eq!(alpha_format, AlphaFormat::Opaque, "Incorrect alpha format")
-    } else {
-        panic!("Format was not `Uncompressed`");
-    }
+            alpha_format,
+        } => {
+            // surprise! not all nvtt binaries use the same pitch with nvassemble
+            // assert_eq!(pitch, 3, "Format should be 3-byte pitch");
+            assert_eq!(
+                color_format,
+                ColorFormat::RGB {
+                    r_mask: 0xFF0000,
+                    g_mask: 0xFF00,
+                    b_mask: 0xFF,
+                    srgb: false,
+                },
+                "Incorrect color format"
+            );
+            assert_eq!(alpha_format, AlphaFormat::Opaque, "Incorrect alpha format");
+            (pitch, color_format, alpha_format)
+        }
+        _ => {
+            panic!("Format was not `Uncompressed`");
+        }
+    };
 
     assert_eq!(texture.mips(), None, "nvassemble never generates mipmaps");
     assert_eq!(texture.layers(), None, "cubemap should not have layers");
@@ -73,7 +76,8 @@ fn load_cubemap() -> Result<()> {
             .try_into_surface()
             .expect("Cubemap faces should be surface primitives");
         let buffer = &surface.buffer;
-        assert_eq!(surface.dimensions(), Dimensions::try_from([128, 128])?);
+        assert_eq!(surface.dimensions(), Dimensions::try_from([128, 128])?, "Incorrect image dimensions");
+        assert_eq!(buffer.len(), 128 * 128 * pitch, "Incorrect buffer size");
 
         // test that the images are all loaded on the right boundaries
         // the test image has magenta pixels at the top left and bottom right corners for this reason
@@ -83,8 +87,8 @@ fn load_cubemap() -> Result<()> {
             "First pixel is not magenta"
         );
         assert_eq!(
-            buffer[buffer.len() - 3..],
-            [0xFF, 0x00, 0xFF],
+            buffer[buffer.len() - pitch..],
+            [0xFF, 0x00, 0xFF, 0x00][0..pitch],
             "Last pixel is not magenta"
         );
     }

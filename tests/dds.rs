@@ -89,8 +89,8 @@ fn load_cubemap() -> Result<()> {
             "First pixel is not magenta"
         );
         assert_eq!(
-            buffer[buffer.len() - pitch..],
-            [0xFF, 0x00, 0xFF, 0x00][0..pitch],
+            buffer[buffer.len() - pitch..][0..3],
+            [0xFF, 0x00, 0xFF],
             "Last pixel is not magenta"
         );
     }

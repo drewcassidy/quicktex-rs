@@ -19,7 +19,7 @@ jobs:
       - name: Setup Rust
         run: rustup toolchain install stable --profile minimal --component rustfmt
 
-      - name: Setup NVTT
+      - name: Install NVTT
         run: sudo apt install libnvtt-bin
 
       - name: Run Checks

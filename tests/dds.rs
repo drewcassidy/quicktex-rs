@@ -29,7 +29,7 @@ fn load_cubemap() -> Result<()> {
 
     // assemble a cubemap from PNGs
     Command::new("nvassemble")
-        .args(["-cube", "-noalpha"])
+        .args(["-cube", "-noalpha", "-bgra"])
         .args(CUBEMAP_FACES.map(|suffix| format!("{IMAGE_DIR}/cubemap{suffix}.png")))
         .args(["-o", "cubemap.dds"])
         .output()?;
@@ -51,9 +51,9 @@ fn load_cubemap() -> Result<()> {
         assert_eq!(
             color_format,
             ColorFormat::RGB {
-                r_mask: 0xFF,
+                r_mask: 0xFF0000,
                 g_mask: 0xFF00,
-                b_mask: 0xFF0000,
+                b_mask: 0xFF,
                 srgb: false,
             },
             "Incorrect color format"

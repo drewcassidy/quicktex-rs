@@ -17,7 +17,7 @@ use crate::shape::{CubeFace, ShapeError, TextureIndex, TextureShape, TextureShap
 #[derive(Clone)]
 pub struct Surface {
     pub(crate) dimensions: Dimensions,
-    pub(crate) buffer: Rc<[u8]>,
+    pub buffer: Rc<[u8]>,
 }
 
 impl Debug for Surface {
@@ -104,7 +104,7 @@ impl<'a, R: Read> SurfaceReader<'a, R> {
 /// An encoded texture, consisting of a [`Format`] and one or more [`Surface`]s
 #[derive(Clone, Debug)]
 pub struct Texture {
-    pub(crate) format: Format,
+    pub format: Format,
     pub(crate) surfaces: TextureShapeNode<Surface>,
 }
 

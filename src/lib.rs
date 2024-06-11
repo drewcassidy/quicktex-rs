@@ -14,3 +14,5 @@ mod util;
 mod blocktexture;
 pub mod error;
 
+pub use container::dds::*;
+

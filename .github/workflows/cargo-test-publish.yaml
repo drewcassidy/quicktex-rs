@@ -16,7 +16,6 @@ jobs:
       - name: Setup Yaclog
         run: |
           pip install yaclog~=1.1
-          yaclog show
 
       - name: Setup Rust
         run: rustup toolchain install stable --profile minimal --component rustfmt

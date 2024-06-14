@@ -95,7 +95,9 @@ fn cubemap_order(face: &CubeFace) -> usize {
 #[derive(Debug, Copy, Clone)]
 #[brw(little, magic = b"DDS ")]
 struct DDSHeaderIntermediate {
-    #[brw(magic = 124u32)] // Size constant
+    #[br(temp)]
+    #[bw(calc = 124u32)]
+    _size: u32,
     #[br(try_map = BitFlags::from_bits)]
     #[bw(map = | bf | bf.bits())]
     pub flags: BitFlags<DDSFlags>,

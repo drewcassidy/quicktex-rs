@@ -23,9 +23,11 @@ enum PixelFormatFlags {
 /// Intermediary literal representation of PixelFormat to leverage BinRW.
 /// This gets converted to/from PixelFormat which is an easier to use data structure
 #[binrw]
-#[brw(magic = 32u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 struct PixelFormatIntermediate {
+    #[br(temp)]
+    #[bw(calc = 32u32)]
+    _size: u32,
     #[br(map = BitFlags::from_bits_truncate)]
     #[bw(map = | bf | bf.bits())]
     pub flags: BitFlags<PixelFormatFlags>,

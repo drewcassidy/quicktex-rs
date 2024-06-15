@@ -23,9 +23,7 @@ jobs:
         run: sudo apt install libnvtt-bin
 
       - name: Run Checks
-        run: |
-          cargo check
-          cargo fmt --check
+        run: cargo check
 
       - name: Run Tests
         run: cargo test

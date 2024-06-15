@@ -13,8 +13,6 @@ use crate::format::Format;
 use crate::shape::CubeFace;
 use crate::texture::{Surfaces, Texture};
 
-pub mod dds;
-
 pub trait ContainerHeader: Sized + Clone + Debug + BinRead + BinWrite
 where
     for<'a> <Self as BinRead>::Args<'a>: Default,

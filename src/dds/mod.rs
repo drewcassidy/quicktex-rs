@@ -2,124 +2,31 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::fmt::Debug;
 use std::io::{Read, Seek, Write};
 
-use binrw::prelude::*;
-use enumflags2::{bitflags, make_bitflags, BitFlags};
+use binrw::binrw;
+use enumflags2::{BitFlags, make_bitflags};
 use itertools::Itertools;
 use strum::VariantArray;
 
-use crate::container::dds::dx10_header::AlphaMode;
+use dx10_header::{AlphaMode, DX10HeaderIntermediate, DXGIFormat};
+use header::{Caps1, DDSHeaderIntermediate};
+use header::DDSFlags;
+use pixel_format::PixelFormat;
+
 use crate::container::ContainerHeader;
 use crate::dimensions::{Dimensioned, Dimensions};
 use crate::error::{TextureError, TextureResult};
 use crate::format::Format;
 use crate::shape::{CubeFace, TextureShape};
 use crate::texture::{SurfaceReader, Surfaces, Texture};
-use dx10_header::{DX10HeaderIntermediate, DXGIFormat};
-use pixel_format::PixelFormat;
 
 mod dx10_header;
+mod header;
 mod pixel_format;
 
-#[bitflags]
-#[repr(u32)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DDSFlags {
-    Caps = 0x1,
-    Height = 0x2,
-    Width = 0x4,
-    Pitch = 0x8,
-    PixelFormat = 0x1000,
-    MipmapCount = 0x20000,
-    LinearSize = 0x80000,
-    Depth = 0x800000,
-}
-
-#[bitflags]
-#[repr(u32)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Caps1 {
-    Complex = 0x8,
-    Mipmap = 0x400000,
-    Texture = 0x1000,
-}
-
-#[bitflags]
-#[repr(u32)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Caps2 {
-    Cubemap = 0x200,
-    CubemapPositiveX = 0x400,
-    CubemapNegativeX = 0x800,
-    CubemapPositiveY = 0x1000,
-    CubemapNegativeY = 0x2000,
-    CubemapPositiveZ = 0x4000,
-    CubemapNegativeZ = 0x8000,
-    Volume = 0x200000,
-}
-
-static CAPS_CUBEMAP_MAP: [(Caps2, CubeFace); 6] = [
-    (Caps2::CubemapPositiveX, CubeFace::PositiveX),
-    (Caps2::CubemapNegativeX, CubeFace::NegativeX),
-    (Caps2::CubemapPositiveY, CubeFace::PositiveY),
-    (Caps2::CubemapNegativeY, CubeFace::NegativeY),
-    (Caps2::CubemapPositiveZ, CubeFace::PositiveZ),
-    (Caps2::CubemapNegativeZ, CubeFace::NegativeZ),
-];
-
-impl Caps2 {
-    fn to_cubemap_face(self) -> Option<CubeFace> {
-        CAPS_CUBEMAP_MAP
-            .iter()
-            .find_map(|(cap, face)| (*cap == self).then_some(*face))
-    }
-
-    fn from_cubemap_face(face: CubeFace) -> Self {
-        CAPS_CUBEMAP_MAP
-            .iter()
-            .find_map(|(cap, rface)| (*rface == face).then_some(*cap))
-            .expect("Invalid cubemap face")
-    }
-}
-
-fn cubemap_order(face: &CubeFace) -> usize {
-    CAPS_CUBEMAP_MAP
-        .iter()
-        .position(|(_, rface)| *rface == *face)
-        .expect("Invalid cubemap face")
-}
-
-#[binrw]
-#[derive(Debug, Copy, Clone)]
-#[brw(little, magic = b"DDS ")]
-struct DDSHeaderIntermediate {
-    #[br(temp)]
-    #[bw(calc = 124u32)]
-    _size: u32,
-    #[br(try_map = BitFlags::from_bits)]
-    #[bw(map = | bf | bf.bits())]
-    pub flags: BitFlags<DDSFlags>,
-    pub height: u32,
-    pub width: u32,
-    pub pitch_or_linear_size: u32,
-    pub depth: u32,
-    pub mipmap_count: u32,
-    #[brw(pad_before = 44)]
-    pub pixel_format: PixelFormat,
-    #[br(try_map = BitFlags::from_bits)]
-    #[bw(map = | bf | bf.bits())]
-    pub caps1: BitFlags<Caps1>,
-    #[br(try_map = BitFlags::from_bits)]
-    #[bw(map = | bf | bf.bits())]
-    pub caps2: BitFlags<Caps2>,
-    pub caps3: u32,
-    #[brw(pad_after = 4)]
-    pub caps4: u32,
-    #[br(if (pixel_format.is_dx10()))]
-    pub dx10_header: Option<DX10HeaderIntermediate>,
-}
+#[cfg(test)]
+mod tests;
 
 #[binrw]
 #[derive(Debug, Clone)]
@@ -173,10 +80,10 @@ impl TryFrom<DDSHeaderIntermediate> for DDSHeader {
             } else {
                 Dimensions::try_from([raw.width, raw.height])?
             };
-            let faces = raw.caps2.contains(Caps2::Cubemap).then_some(
+            let faces = raw.caps2.contains(header::Caps2::Cubemap).then_some(
                 raw.caps2
                     .iter()
-                    .filter_map(Caps2::to_cubemap_face)
+                    .filter_map(header::Caps2::to_cubemap_face)
                     .collect_vec(),
             );
 
@@ -196,7 +103,7 @@ impl TryFrom<DDSHeader> for DDSHeaderIntermediate {
     fn try_from(header: DDSHeader) -> Result<Self, Self::Error> {
         let mut flags = make_bitflags!(DDSFlags::{Caps | Width | Height | PixelFormat });
         let mut caps1 = make_bitflags!(Caps1::{Texture});
-        let mut caps2 = BitFlags::<Caps2>::default();
+        let mut caps2 = BitFlags::<header::Caps2>::default();
 
         let format = header.format();
         let (dimensions, mips, pixel_format, dx10_header) = match header {
@@ -209,9 +116,9 @@ impl TryFrom<DDSHeader> for DDSHeaderIntermediate {
             } => {
                 if let Some(faces) = faces {
                     caps1 |= Caps1::Complex;
-                    caps2 |= Caps2::Cubemap;
+                    caps2 |= header::Caps2::Cubemap;
                     for face in faces {
-                        caps2 |= Caps2::from_cubemap_face(face)
+                        caps2 |= header::Caps2::from_cubemap_face(face)
                     }
                 }
                 (dimensions, mips, format, None)
@@ -228,9 +135,9 @@ impl TryFrom<DDSHeader> for DDSHeaderIntermediate {
             } => {
                 if is_cubemap {
                     caps1 |= Caps1::Complex;
-                    caps2 |= Caps2::Cubemap;
+                    caps2 |= header::Caps2::Cubemap;
                     for face in CubeFace::VARIANTS {
-                        caps2 |= Caps2::from_cubemap_face(*face)
+                        caps2 |= header::Caps2::from_cubemap_face(*face)
                     }
                 }
 
@@ -367,9 +274,11 @@ impl ContainerHeader for DDSHeader {
             reader,
         };
         let layers = self.layers()?;
-        let faces = self
-            .faces()?
-            .map(|f| f.into_iter().sorted_by_key(cubemap_order).collect_vec());
+        let faces = self.faces()?.map(|f| {
+            f.into_iter()
+                .sorted_by_key(header::cubemap_order)
+                .collect_vec()
+        });
         let mips = self.mips()?;
 
         // DDS files are ordered as Array(Cubemap(Mipmap(Surface)))
@@ -389,7 +298,7 @@ impl ContainerHeader for DDSHeader {
         for (_, layer) in surfaces.iter_layers() {
             for (_, face) in layer
                 .iter_faces()
-                .sorted_by_key(|(c, _)| c.map_or(0, |c| cubemap_order(&c)))
+                .sorted_by_key(|(c, _)| c.map_or(0, |c| header::cubemap_order(&c)))
             {
                 for (_, mip) in face.iter_mips() {
                     writer.write(

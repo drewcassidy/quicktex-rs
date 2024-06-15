@@ -5,6 +5,7 @@
 mod blocktexture;
 pub mod color;
 pub mod container;
+pub mod dds;
 pub mod dimensions;
 pub mod error;
 pub mod format;
@@ -13,5 +14,3 @@ pub mod s3tc;
 pub mod shape;
 pub mod texture;
 mod util;
-
-pub use container::dds::*;

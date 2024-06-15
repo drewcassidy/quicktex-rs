@@ -2,21 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 use std::fs::File;
 use std::io::Read;
-use std::process::Command;
 
 use anyhow::Result;
-use tempfile::tempdir;
 
-use quicktex::container::ContainerHeader;
-use quicktex::dimensions::{Dimensioned, Dimensions};
-use quicktex::format::{AlphaFormat, ColorFormat, Format};
-use quicktex::shape::{CubeFace, TextureShape};
-use quicktex::*;
+use crate::container::ContainerHeader;
+use crate::dimensions::{Dimensioned, Dimensions};
+use crate::format::{AlphaFormat, ColorFormat, Format};
+use crate::shape::{CubeFace, TextureShape};
 
-const DDS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/dds");
-const CUBEMAP_FACES: [&str; 6] = ["+X", "-X", "+Y", "-Y", "+Z", "-Z"];
+use super::DDSHeader;
+
+const DDS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/images/dds");
 
 #[test]
 /// Read a cubemap made using nvassemble.
@@ -40,7 +42,6 @@ fn read_cubemap() -> Result<()> {
             alpha_format: AlphaFormat::Opaque
         }
     );
-    let pitch = 3;
 
     assert_eq!(texture.mips(), None, "nvassemble never generates mipmaps");
     assert_eq!(texture.layers(), None, "cubemap should not have layers");
@@ -58,12 +59,12 @@ fn read_cubemap() -> Result<()> {
             Dimensions::try_from([128, 128])?,
             "Incorrect image dimensions"
         );
-        assert_eq!(buffer.len(), 128 * 128 * pitch, "Incorrect buffer size");
+        assert_eq!(buffer.len(), 128 * 128 * 3, "Incorrect buffer size");
 
         let magenta = [0xFF, 0x00, 0xFF];
         assert_eq!(buffer[..3], magenta, "First pixel is not magenta");
         assert_eq!(
-            buffer[buffer.len() - pitch..][0..3],
+            buffer[buffer.len() - 3..],
             magenta,
             "Last pixel is not magenta"
         );
@@ -76,8 +77,8 @@ fn read_cubemap() -> Result<()> {
             CubeFace::PositiveZ => ([0xBC, 0xBC, 0xFF], 31), //blue
             CubeFace::NegativeZ => ([0xFF, 0xFF, 0xBC], 31), //yellow
         };
-        let bg_index = bg_index * pitch;
-        let bg = &buffer[bg_index..bg_index + pitch][..3];
+        let bg_index = bg_index * 3;
+        let bg = &buffer[bg_index..bg_index + 3];
         assert_eq!(*bg, expected_bg, "Background color incorrect for {face:?}");
     }
 

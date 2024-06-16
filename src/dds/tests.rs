@@ -10,6 +10,7 @@ use std::fs::File;
 use std::io::Read;
 
 use anyhow::Result;
+use generic_parameterize::parameterize;
 
 use crate::container::ContainerHeader;
 use crate::dimensions::{Dimensioned, Dimensions};
@@ -19,6 +20,53 @@ use crate::shape::{CubeFace, TextureShape};
 use super::DDSHeader;
 
 const DDS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/images/dds");
+
+#[parameterize(format_name=["bc1", "bc4", "bc5", "lumi", "rgb"], fmt="read_peppers16_{format_name}")]
+#[test]
+fn read_texture(format_name: &str) -> Result<()> {
+    let texpath = format!("{DDS_DIR}/peppers16 {format_name}.dds");
+    let mut reader = File::open(texpath)?;
+    let texture = DDSHeader::read_texture(&mut reader)?;
+
+    // make sure parsed format is correct
+    match (format_name, texture.format) {
+        ("bc1", Format::BC1 { srgb: false }) => {}
+        ("bc4", Format::BC4 { signed: false }) => {}
+        ("bc5", Format::BC5 { signed: false }) => {}
+        (
+            "lumi",
+            Format::Uncompressed {
+                color_format: ColorFormat::L { .. },
+                alpha_format: AlphaFormat::Opaque,
+                ..
+            },
+        ) => {}
+        (
+            "rgb",
+            Format::Uncompressed {
+                color_format: ColorFormat::RGB { .. },
+                ..
+            },
+        ) => {}
+        (_, format) => panic!("Unexpect format for `peppers16 {format_name}.dds`: \n{format:#?}"),
+    }
+
+    // make sure other texture information is correct
+    assert_eq!(texture.mips(), Some(5));
+    assert_eq!(texture.faces(), None);
+    assert_eq!(texture.layers(), None);
+    assert_eq!(
+        texture.dimensions(),
+        Dimensions::try_from([16, 16]).unwrap()
+    );
+
+    // make sure there's no more data to read
+    let mut remainder = Vec::new();
+    reader.read_to_end(&mut remainder)?;
+    assert_eq!(remainder.len(), 0, "Data left unread in file");
+
+    Ok(())
+}
 
 #[test]
 /// Read a cubemap made using nvassemble.

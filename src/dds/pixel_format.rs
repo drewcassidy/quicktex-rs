@@ -1,10 +1,10 @@
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
 
-use crate::error::TextureError;
 use binrw::prelude::*;
 use enumflags2::{bitflags, BitFlags};
 
+use crate::error::TextureError;
 use crate::format::{AlphaFormat, ColorFormat, Format};
 
 /// Bit flags for identifying various information in a [`PixelFormatIntermediate`] object. Not exposed to the API.
@@ -209,7 +209,7 @@ impl TryFrom<PixelFormat> for Format {
                     b"DXT1" => Ok(BC1 { srgb: false }), // DXT1, AKA BC1
                     b"DXT3" => Ok(BC2 { srgb: false }), // DXT3, AKA BC2
                     b"DXT5" => Ok(BC3 { srgb: false }), // DXT5, AKA BC3
-                    b"BC4U" => Ok(BC4 { signed: false }), // BC4 Unsigned
+                    b"ATI1" | b"BC4U" => Ok(BC4 { signed: false }), // BC4 Unsigned
                     b"BC4S" => Ok(BC4 { signed: true }), // BC4 Signed
                     b"ATI2" | b"BC5U" => Ok(BC5 { signed: false }), // BC5 Unsigned
                     b"BC5S" => Ok(BC5 { signed: true }), // BC5 Signed
@@ -248,7 +248,7 @@ impl TryFrom<Format> for PixelFormat {
             Format::BC1 { .. } => Ok(PixelFormat::FourCC(b"DXT1".into())),
             Format::BC2 { .. } => Ok(PixelFormat::FourCC(b"DXT3".into())),
             Format::BC3 { .. } => Ok(PixelFormat::FourCC(b"DXT5".into())),
-            Format::BC4 { signed: false } => Ok(PixelFormat::FourCC(b"BC4U".into())),
+            Format::BC4 { signed: false } => Ok(PixelFormat::FourCC(b"ATI1".into())),
             Format::BC4 { signed: true } => Ok(PixelFormat::FourCC(b"BC4S".into())),
             Format::BC5 { signed: false } => Ok(PixelFormat::FourCC(b"ATI2".into())),
             Format::BC5 { signed: true } => Ok(PixelFormat::FourCC(b"BC5S".into())),

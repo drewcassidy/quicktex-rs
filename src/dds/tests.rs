@@ -150,7 +150,7 @@ fn roundtrip(texpath: String) -> Result<()> {
 
     let mut outbuffer: Vec<u8> = vec![];
     let mut outbuffer_writer = Cursor::new(&mut outbuffer);
-    let out_header = DDSHeader::for_texture(&in_texture)?;
+    let out_header = DDSHeader::from_texture(&in_texture)?;
     out_header.write(&mut outbuffer_writer)?;
     out_header.write_surfaces(&mut outbuffer_writer, in_texture.surfaces)?;
 

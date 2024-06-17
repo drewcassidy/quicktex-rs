@@ -11,6 +11,6 @@ fn main() {
     let mut the_file = File::open("/Users/drewcassidy/Downloads/cmft_cubemap.dds").unwrap();
     let the_dds = dds::DDSHeader::read_texture(&mut the_file).unwrap();
     println!("{the_dds:#?}");
-    let new_header = dds::DDSHeader::for_texture(&the_dds);
+    let new_header = dds::DDSHeader::from_texture(&the_dds);
     println!("{new_header:#?}");
 }

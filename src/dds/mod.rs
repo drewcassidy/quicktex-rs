@@ -314,7 +314,7 @@ impl ContainerHeader for DDSHeader {
         Ok(())
     }
 
-    fn for_texture_args(
+    fn from_texture_args(
         texture: &Texture,
         args: &<Self as ContainerHeader>::Args,
     ) -> TextureResult<Self> {

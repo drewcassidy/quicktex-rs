@@ -138,12 +138,9 @@ fn read_cubemap() -> Result<()> {
     Ok(())
 }
 
-#[parameterize(format_name=["bc1", "bc4", "bc5", "lumi", "rgb"], fmt="roundtrip_peppers16_{format_name}")]
-#[test]
-fn roundtrip(format_name: &str) -> Result<()> {
+fn roundtrip(texpath: String) -> Result<()> {
     use std::io::Cursor;
 
-    let texpath = format!("{DDS_DIR}/peppers16 {format_name}.dds");
     let mut reader = File::open(texpath)?;
     let mut inbuffer: Vec<u8> = vec![];
     reader.read_to_end(&mut inbuffer)?;
@@ -177,4 +174,17 @@ fn roundtrip(format_name: &str) -> Result<()> {
     );
 
     Ok(())
+}
+
+#[parameterize(format_name=["bc1", "bc4", "bc5", "lumi", "rgb"], fmt="roundtrip_peppers16_{format_name}")]
+#[test]
+fn roundtrip_texture(format_name: &str) -> Result<()> {
+    let texpath = format!("{DDS_DIR}/peppers16 {format_name}.dds");
+    roundtrip(texpath)
+}
+
+#[test]
+fn roundtrip_cubemap() -> Result<()> {
+    let cubepath = format!("{DDS_DIR}/cubemap.dds");
+    roundtrip(cubepath)
 }

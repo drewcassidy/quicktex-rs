@@ -10,6 +10,7 @@ use std::fs::File;
 use std::io::Read;
 
 use anyhow::Result;
+use binrw::{BinRead, BinWrite};
 use generic_parameterize::parameterize;
 
 use crate::container::ContainerHeader;
@@ -134,5 +135,46 @@ fn read_cubemap() -> Result<()> {
     let mut remainder = Vec::new();
     reader.read_to_end(&mut remainder)?;
     assert_eq!(remainder.len(), 0, "Data left unread in file");
+    Ok(())
+}
+
+#[parameterize(format_name=["bc1", "bc4", "bc5", "lumi", "rgb"], fmt="roundtrip_peppers16_{format_name}")]
+#[test]
+fn roundtrip(format_name: &str) -> Result<()> {
+    use std::io::Cursor;
+
+    let texpath = format!("{DDS_DIR}/peppers16 {format_name}.dds");
+    let mut reader = File::open(texpath)?;
+    let mut inbuffer: Vec<u8> = vec![];
+    reader.read_to_end(&mut inbuffer)?;
+
+    let mut inbuffer_reader = Cursor::new(&mut inbuffer);
+    let in_texture = DDSHeader::read_texture(&mut inbuffer_reader)?;
+
+    let mut outbuffer: Vec<u8> = vec![];
+    let mut outbuffer_writer = Cursor::new(&mut outbuffer);
+    let out_header = DDSHeader::for_texture(&in_texture)?;
+    out_header.write(&mut outbuffer_writer)?;
+    out_header.write_surfaces(&mut outbuffer_writer, in_texture.surfaces)?;
+
+    assert_eq!(outbuffer[..4], b"DDS "[..], "Magic bytes are not 'DDS '");
+    assert_eq!(
+        outbuffer[0..28],
+        inbuffer[0..28],
+        "Header data doesnt match"
+    );
+    assert_eq!(
+        outbuffer[76..120],
+        inbuffer[76..120],
+        "Header data doesnt match"
+    );
+
+    // check surfaces
+    assert_eq!(
+        outbuffer[128..],
+        inbuffer[128..],
+        "Surface data doesnt match"
+    );
+
     Ok(())
 }

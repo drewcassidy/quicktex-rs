@@ -187,7 +187,7 @@ impl From<PixelFormat> for PixelFormatIntermediate {
                 PixelFormatIntermediate {
                     flags: color_flag | alpha_flag,
                     four_cc: FourCC::default(),
-                    bit_count: pitch * 8,
+                    bit_count: pitch,
                     bitmasks,
                 }
             }

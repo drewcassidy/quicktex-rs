@@ -185,6 +185,7 @@ impl TryFrom<DDSHeader> for DDSHeaderIntermediate {
             Some(m) => {
                 flags |= DDSFlags::MipmapCount;
                 caps1 |= Caps1::Complex;
+                caps1 |= Caps1::Mipmap;
                 m
             }
         };

@@ -2,18 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use crate::blocktexture::Block;
-use crate::color::{Color, ColorImpl};
-use crate::pack::{Pack, Unpack};
-use bitvec::prelude::*;
 use std::iter::zip;
+
+use bitvec::prelude::*;
 use vector_victor::Matrix;
 
-pub struct BC1Format {}
+use crate::blocktexture::Block;
+use crate::color::{ColorImpl, RGBA};
+use crate::pack::{Pack, Unpack};
+
+mod decode;
+mod encode;
 
 #[derive(Copy, Clone)]
 pub struct BC1Block {
-    colors: [Color; 2],
+    colors: [RGBA; 2],
     codes: Matrix<u8, 4, 4>,
 }
 
@@ -41,8 +44,8 @@ impl Block for BC1Block {
         let bits = bytes.as_bits::<Msb0>();
 
         // load endpoints
-        let color0 = Color::from_565(bits[0..16].load_le());
-        let color1 = Color::from_565(bits[16..32].load_le());
+        let color0 = RGBA::from_565(bits[0..16].load_le());
+        let color1 = RGBA::from_565(bits[16..32].load_le());
 
         // load codes
         let codes = Matrix::<u8, 4, 4>::from_rows(

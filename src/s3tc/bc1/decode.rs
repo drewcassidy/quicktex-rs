@@ -1,0 +1,1 @@
+struct BC1Decoder {}

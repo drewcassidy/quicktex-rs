@@ -2,8 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use crate::dimensions::Dimensions;
 use std::fmt::Debug;
+use std::rc::Rc;
+
+use image::DynamicImage;
+
+use crate::dimensions::Dimensions;
+use crate::error::TextureResult;
+
+pub trait Encoder {
+    fn encode_buffer(&self, image: DynamicImage) -> Rc<[u8]>;
+}
+
+pub trait Decoder {
+    fn decode_buffer(&self, buffer: Rc<[u8]>) -> TextureResult<DynamicImage>;
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AlphaFormat {
@@ -92,5 +105,13 @@ impl Format {
             }
             Uncompressed { pitch, .. } => *pitch * dimensions.product() as usize,
         }
+    }
+
+    pub fn decoder(&self) -> Box<dyn Decoder> {
+        todo!()
+    }
+
+    pub fn encoder(&self) -> Box<dyn Encoder> {
+        todo!()
     }
 }
